@@ -56,6 +56,7 @@ E_2 = np.fft.ifft(np.fft.fftshift(H_2*spect, axes=1), norm='forward')
 def update(t_i) -> Iterable[Artist]:
     ln1.set_data(z, E_1[:, t_i].real)
     ln2.set_data(z, E_2[:, t_i].real)
+    fig.suptitle(f't = {t[t_i]:.2e} s')
     return ln1, ln2
 
 
@@ -65,10 +66,23 @@ def init_fig() -> Iterable[Artist]:
     return ln1, ln2
 
 
-plt.stem(freqs, spect)
+fig: plt.Figure
+ax: plt.Axes
+
 fig, ax = plt.subplots()
-ln1, = ax.plot([], [])
-ln2, = ax.plot([], [])
+ax.stem(2*np.pi*freqs, spect,
+        label='$\\hat{E}_0 (z=0, \\omega)$', markerfmt='b.', linefmt='blue')
+ax.set_xlabel('$\\omega$ [rad/s]')
+ax.set_xticks(2*np.pi*np.array([0, f_0, -f_0]),
+              labels=[0, f'$2\\pi f_0$', f'$-2\\pi f_0$'])
+ax.legend()
+fig.suptitle('Frequency domain')
+
+fig, ax = plt.subplots()
+ln1, = ax.plot([], [], color='blue', label='Non-dispersive wave')
+ln2, = ax.plot([], [], color='red', label='Dispersive wave')
+ax.set_xlabel('Distance [m]')
+ax.legend()
 
 ani = FuncAnimation(fig, update, frames=t_indices,
                     init_func=init_fig, interval=10)
