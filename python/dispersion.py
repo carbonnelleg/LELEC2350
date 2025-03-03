@@ -63,15 +63,16 @@ ax.set_xticks(2*np.pi*np.array([0, f_0, -f_0, f_c, -f_c]),
 ax.legend()
 fig1.suptitle('Frequency domain')
 
+
 fig2, ax = plt.subplots(num='Dispersion relation')
-ax.plot(np.real(np.fft.fftshift(k_1)[:len(k_1)//2]),
-        2*np.pi*np.fft.fftshift(freqs)[:len(freqs)//2],
+ax.plot(np.real(k_1[len(k_1)//2:]),
+        2*np.pi*freqs[len(freqs)//2:],
         color='blue', label='Non-dispersive wave')
-ax.plot(np.real(np.fft.fftshift(k_2)[:len(k_2)//2]),
-        2*np.pi*np.fft.fftshift(freqs)[:len(freqs)//2],
+ax.plot(np.real(k_2[len(k_2)//2:]),
+        2*np.pi*freqs[len(freqs)//2:],
         color='red', label=r'Dispersive wave ($\beta$)')
-ax.plot(-np.imag(np.fft.fftshift(k_2)[:len(k_2)//2]),
-        2*np.pi*np.fft.fftshift(freqs)[:len(freqs)//2],
+ax.plot(-np.imag(k_2[len(k_2)//2:]),
+        2*np.pi*freqs[len(freqs)//2:],
         color='red', linestyle=':', label=r'Dispersive wave ($\alpha$)')
 ax.set_xlabel(r'$\alpha,\; \beta$ [1/m]')
 ax.set_ylabel(r'$\omega$ [rad/s]')
@@ -80,6 +81,7 @@ ax.set_yticks(2*np.pi*np.array([0, f_c, f_0]),
 ax.legend()
 ax.grid(True, axis='y')
 fig2.suptitle('Phase and group velocities')
+
 
 fig3, ax = plt.subplots(num='Animation')
 ln1, = ax.plot([], [], color='blue', label='Non-dispersive wave')
