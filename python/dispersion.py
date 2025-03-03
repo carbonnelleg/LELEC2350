@@ -10,6 +10,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 from matplotlib.artist import Artist
 from matplotlib import pyplot as plt
+import matplotlib as mpl
 from scipy.constants import speed_of_light as c
 from scipy import signal as sg
 
@@ -53,37 +54,54 @@ H_2 = np.exp(-1j*np.outer(z, k_2))
 E_2 = np.fft.ifft(np.fft.fftshift(H_2*spect, axes=1), norm='forward')
 
 
+fig1, ax = plt.subplots(num='Spectrum')
+ax.stem(2*np.pi*freqs, spect,
+        label=r'$\hat{E}_0 (z=0, \omega)$', markerfmt='b.', linefmt='blue')
+ax.set_xlabel(r'$\omega$ [rad/s]')
+ax.set_xticks(2*np.pi*np.array([0, f_0, -f_0, f_c, -f_c]),
+              labels=[0, r'$\omega_0$', r'$-\omega_0$', r'$\omega_c$', r'$-\omega_c$'])
+ax.legend()
+fig1.suptitle('Frequency domain')
+
+fig2, ax = plt.subplots(num='Dispersion relation')
+ax.plot(np.real(np.fft.fftshift(k_1)[:len(k_1)//2]),
+        2*np.pi*np.fft.fftshift(freqs)[:len(freqs)//2],
+        color='blue', label='Non-dispersive wave')
+ax.plot(np.real(np.fft.fftshift(k_2)[:len(k_2)//2]),
+        2*np.pi*np.fft.fftshift(freqs)[:len(freqs)//2],
+        color='red', label=r'Dispersive wave ($\beta$)')
+ax.plot(-np.imag(np.fft.fftshift(k_2)[:len(k_2)//2]),
+        2*np.pi*np.fft.fftshift(freqs)[:len(freqs)//2],
+        color='red', linestyle=':', label=r'Dispersive wave ($\alpha$)')
+ax.set_xlabel(r'$\alpha,\; \beta$ [1/m]')
+ax.set_ylabel(r'$\omega$ [rad/s]')
+ax.set_yticks(2*np.pi*np.array([0, f_c, f_0]),
+              labels=[0, r'$\omega_c$', r'$\omega_0$'])
+ax.legend()
+ax.grid(True, axis='y')
+fig2.suptitle('Phase and group velocities')
+
+fig3, ax = plt.subplots(num='Animation')
+ln1, = ax.plot([], [], color='blue', label='Non-dispersive wave')
+ln2, = ax.plot([], [], color='red', label='Dispersive wave')
+
+
 def update(t_i) -> Iterable[Artist]:
     ln1.set_data(z, E_1[:, t_i].real)
     ln2.set_data(z, E_2[:, t_i].real)
-    fig.suptitle(f't = {t[t_i]:.2e} s')
+    fig3.suptitle(f't = {t[t_i]:.2e} s')
     return ln1, ln2
 
 
 def init_fig() -> Iterable[Artist]:
+    ax.set_xlabel('Distance [m]')
+    ax.legend()
     ax.set_xlim((z_min, z_max))
     ax.set_ylim((-1., 1.))
     return ln1, ln2
 
 
-fig: plt.Figure
-ax: plt.Axes
+anim = FuncAnimation(fig3, update, frames=t_indices,
+                     init_func=init_fig, interval=10)
 
-fig, ax = plt.subplots()
-ax.stem(2*np.pi*freqs, spect,
-        label='$\\hat{E}_0 (z=0, \\omega)$', markerfmt='b.', linefmt='blue')
-ax.set_xlabel('$\\omega$ [rad/s]')
-ax.set_xticks(2*np.pi*np.array([0, f_0, -f_0]),
-              labels=[0, f'$2\\pi f_0$', f'$-2\\pi f_0$'])
-ax.legend()
-fig.suptitle('Frequency domain')
-
-fig, ax = plt.subplots()
-ln1, = ax.plot([], [], color='blue', label='Non-dispersive wave')
-ln2, = ax.plot([], [], color='red', label='Dispersive wave')
-ax.set_xlabel('Distance [m]')
-ax.legend()
-
-ani = FuncAnimation(fig, update, frames=t_indices,
-                    init_func=init_fig, interval=10)
 plt.show()
