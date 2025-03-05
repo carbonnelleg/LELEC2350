@@ -10,7 +10,6 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 from matplotlib.artist import Artist
 from matplotlib import pyplot as plt
-import matplotlib as mpl
 from scipy.constants import speed_of_light as c
 from scipy import signal as sg
 
