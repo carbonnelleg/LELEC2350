@@ -99,7 +99,7 @@ def init_fig() -> Iterable[Artist]:
     ax.legend()
     ax.set_xlim((z_min, z_max))
     ax.set_ylim((-1., 1.))
-    return ln1, ln2
+    return ax.get_lines()
 
 
 anim = FuncAnimation(fig3, update, frames=t_indices,
