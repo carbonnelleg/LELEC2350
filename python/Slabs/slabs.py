@@ -27,7 +27,7 @@ slab1_start, slab1_end = 2., 4.
 slab2_start, slab2_end = 6., 8.
 
 t_min = 0.
-t_max = 7.0e-7
+t_max = 1.4e-7
 t_step = 1.0e-10
 t = np.arange(t_min, t_max, t_step)
 t_indices = np.arange(t.size)
@@ -66,18 +66,24 @@ def update_slab(z, slab1_start, slab1_end, slab2_start, slab2_end):
     z_1 = z[(z <= slab1_start).nonzero()]
     z_2 = z[((z > slab1_start) & (z < slab1_end)).nonzero()] - slab1_start
     z_3 = z[((z >= slab1_end) & (z <= slab2_start)).nonzero()] - slab1_end
-    z_4 = z[((z > slab2_start) & (z < slab2_end)).nonzero()] - slab2_start  
+    z_4 = z[((z > slab2_start) & (z < slab2_end)).nonzero()] - slab2_start
     z_5 = z[(z >= slab2_end).nonzero()] - slab2_end
 
     k_air = 2*np.pi*freqs*np.sqrt(eps_air * mu_0)
     k_slab = 2*np.pi*freqs*np.sqrt(eps_slab * mu_0)
-    k_1 = np.outer(2*np.pi*freqs, np.sqrt(np.full_like(z_1, eps_air) * mu_0))
-    k_2 = np.outer(2*np.pi*freqs, np.sqrt(np.full_like(z_2, eps_slab) * mu_0))
-    k_3 = np.outer(2*np.pi*freqs, np.sqrt(np.full_like(z_3, eps_air) * mu_0))
-    k_4 = np.outer(2*np.pi*freqs, np.sqrt(np.full_like(z_4, eps_slab) * mu_0))
-    k_5 = np.outer(2*np.pi*freqs, np.sqrt(np.full_like(z_5, eps_air) * mu_0))
+    k_1 = np.tile(k_air, (z_1.size, 1)).T
+    k_2 = np.tile(k_slab, (z_2.size, 1)).T
+    k_3 = np.tile(k_air, (z_3.size, 1)).T
+    k_4 = np.tile(k_slab, (z_4.size, 1)).T
+    k_5 = np.tile(k_air, (z_5.size, 1)).T
 
-    A_5 = np.ones_like(freqs)
+    tot_delay = 0.
+    tot_delay += (slab1_start + slab2_start - slab1_end) * \
+        np.sqrt(eps_air * mu_0)
+    tot_delay += (slab1_end - slab1_start + slab2_end - slab2_start) * \
+        np.sqrt(eps_slab * mu_0)
+
+    A_5 = np.exp(-2j*np.pi*freqs*tot_delay)
     A_4 = 1/tau_prime * A_5 * \
         np.exp(1j*k_slab*(slab2_end-slab2_start))
     B_4 = rho_prime/tau_prime * A_5 * \
