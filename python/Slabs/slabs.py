@@ -20,7 +20,7 @@ Declaring variables
 """
 z_min = 0.
 z_max = 10.
-z_step = 1.0e-2
+z_step = 4.0e-3
 z = np.arange(z_min, z_max, z_step)
 
 slab1_start, slab1_end = 2., 4.
@@ -59,30 +59,34 @@ rho_prime = -rho
 tau_prime = 1 + rho_prime
 
 
-def update_slab(z, slab1_start, slab1_end, slab2_start, slab2_end):
+def update_slab(slab1_start, slab1_end, slab2_start, slab2_end):
+    # Define air and slab region
     is_slab = ((z > slab1_start) & (z < slab1_end)) | \
               ((z > slab2_start) & (z < slab2_end))
 
+    # Define local variables for 5 consecutive layers
     z_1 = z[(z <= slab1_start).nonzero()]
     z_2 = z[((z > slab1_start) & (z < slab1_end)).nonzero()] - slab1_start
     z_3 = z[((z >= slab1_end) & (z <= slab2_start)).nonzero()] - slab1_end
     z_4 = z[((z > slab2_start) & (z < slab2_end)).nonzero()] - slab2_start
     z_5 = z[(z >= slab2_end).nonzero()] - slab2_end
 
+    # Define wavenumber in both media, only dependent on freq
     k_air = 2*np.pi*freqs*np.sqrt(eps_air * mu_0)
     k_slab = 2*np.pi*freqs*np.sqrt(eps_slab * mu_0)
-    k_1 = np.tile(k_air, (z_1.size, 1)).T
-    k_2 = np.tile(k_slab, (z_2.size, 1)).T
-    k_3 = np.tile(k_air, (z_3.size, 1)).T
-    k_4 = np.tile(k_slab, (z_4.size, 1)).T
-    k_5 = np.tile(k_air, (z_5.size, 1)).T
 
+    # Perform a time shift such that wave starts at z=0, t=0
     tot_delay = 0.
+    # Add delay due to air propagation
     tot_delay += (slab1_start + slab2_start - slab1_end) * \
         np.sqrt(eps_air * mu_0)
+    # Add delay due to slab propagation
     tot_delay += (slab1_end - slab1_start + slab2_end - slab2_start) * \
         np.sqrt(eps_slab * mu_0)
 
+    # Calculate forward (A) and backward (B) fields, only dependent on freq
+    # A_5 is time-delayed by tot_delay
+    # A_i and B_i are shifted wrt A_{i+1} and B_{i+1}
     A_5 = np.exp(-2j*np.pi*freqs*tot_delay)
     A_4 = 1/tau_prime * A_5 * \
         np.exp(1j*k_slab*(slab2_end-slab2_start))
@@ -101,27 +105,31 @@ def update_slab(z, slab1_start, slab1_end, slab2_start, slab2_end):
     B_1 = (rho/tau * A_2 + 1/tau * B_2) * \
         np.exp(-1j*k_air*slab1_start)
 
-    E_1r = A_1*np.exp(-1j*k_1*z_1).T
-    E_1l = B_1*np.exp(1j*k_1*z_1).T
-    E_2r = A_2*np.exp(-1j*k_2*z_2).T
-    E_2l = B_2*np.exp(1j*k_2*z_2).T
-    E_3r = A_3*np.exp(-1j*k_3*z_3).T
-    E_3l = B_3*np.exp(1j*k_3*z_3).T
-    E_4r = A_4*np.exp(-1j*k_4*z_4).T
-    E_4l = B_4*np.exp(1j*k_4*z_4).T
-    E_5r = A_5*np.exp(-1j*k_5*z_5).T
+    # Calculate fields to the right and to the left for all z using propagation
+    E_1r = A_1*np.exp(-1j*np.outer(k_air, z_1)).T
+    E_1l = B_1*np.exp(1j*np.outer(k_air, z_1)).T
+    E_2r = A_2*np.exp(-1j*np.outer(k_slab, z_2)).T
+    E_2l = B_2*np.exp(1j*np.outer(k_slab, z_2)).T
+    E_3r = A_3*np.exp(-1j*np.outer(k_air, z_3)).T
+    E_3l = B_3*np.exp(1j*np.outer(k_air, z_3)).T
+    E_4r = A_4*np.exp(-1j*np.outer(k_slab, z_4)).T
+    E_4l = B_4*np.exp(1j*np.outer(k_slab, z_4)).T
+    E_5r = A_5*np.exp(-1j*np.outer(k_air, z_5)).T
     E_5l = np.zeros_like(E_5r)
-
-    E_r = np.concatenate((E_1r, E_2r, E_3r, E_4r, E_5r), axis=0)
+    
+    # Concatenate both fields and perform IDFT
+    E_r = np.concatenate((E_1r, E_2r, E_3r, E_4r, E_5r), axis=0) 
     E_r = np.fft.ifft(np.fft.ifftshift(E_r * spect, axes=1), norm='forward')
+    E_r /= np.max(np.abs(E_r))
     E_l = np.concatenate((E_1l, E_2l, E_3l, E_4l, E_5l), axis=0)
     E_l = np.fft.ifft(np.fft.ifftshift(E_l * spect, axes=1), norm='forward')
+    E_l /= np.max(np.abs(E_r))
 
     return is_slab, E_r, E_l
 
 
 is_slab, E_r, E_l = update_slab(
-    z, slab1_start, slab1_end, slab2_start, slab2_end)
+    slab1_start, slab1_end, slab2_start, slab2_end)
 
 fig, ax = plt.subplots()
 plt.subplots_adjust(bottom=0.2)
@@ -141,7 +149,7 @@ def update_slider(val):
     new_slab2_end = new_slab2_start + slab2_end - slab2_start
     global E_r, E_l
     new_is_slab, E_r, E_l = update_slab(
-        z, slab1_start, slab1_end, new_slab2_start, new_slab2_end)
+        slab1_start, slab1_end, new_slab2_start, new_slab2_end)
     slab_line.set_ydata(-1+2*new_is_slab)
     fig.canvas.draw_idle()
 
