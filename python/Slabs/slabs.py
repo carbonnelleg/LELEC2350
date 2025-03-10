@@ -23,11 +23,11 @@ z_max = 10.
 z_step = 4.0e-3
 z = np.arange(z_min, z_max, z_step)
 
-slab1_start, slab1_end = 2., 4.
+slab1_start, slab1_end = 2.5, 4.
 slab2_start, slab2_end = 6., 8.
 
 t_min = 0.
-t_max = 1.4e-7
+t_max = 1.0e-7
 t_step = 1.0e-10
 t = np.arange(t_min, t_max, t_step)
 t_indices = np.arange(t.size)
@@ -60,6 +60,23 @@ tau_prime = 1 + rho_prime
 
 
 def update_slab(slab1_start, slab1_end, slab2_start, slab2_end):
+    """
+    Notes
+    -----
+
+    On the simulation, it seems like wave packets are sent from the left at t != 0 such that any
+    wave to the left incident to an interface will be encountering a wave to the right at
+    the same moment. Those two waves will cancel out such that only a resulting wave to the
+    left will be produced. It is not intended to work like that and my guess is that it has something
+    to do with the fact that we are working in the frequency domain and then performing an FFT.
+
+    Solution
+    --------
+
+    This is due to the fact that A_ is imposed, whereas A_1 should be imposed to produce the expected result.
+    Now, it is only a matter of rewriting this function in matricial form where A_1=np.ones_like(freqs) and
+    solving for the other forward and backward fields.
+    """
     # Define air and slab region
     is_slab = ((z > slab1_start) & (z < slab1_end)) | \
               ((z > slab2_start) & (z < slab2_end))
@@ -126,7 +143,6 @@ def update_slab(slab1_start, slab1_end, slab2_start, slab2_end):
     E_l /= np.max(np.abs(E_r))
 
     return is_slab, E_r, E_l
-
 
 is_slab, E_r, E_l = update_slab(
     slab1_start, slab1_end, slab2_start, slab2_end)
