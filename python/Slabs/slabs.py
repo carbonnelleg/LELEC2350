@@ -98,14 +98,14 @@ def update_slab(slab1_start, slab1_end, slab2_start, slab2_end):
         np.exp(-1j*k_air*(slab2_start-slab1_end))
     A_2 = (1/tau_prime * A_3 + rho_prime/tau_prime * B_3) * \
         np.exp(1j*k_slab*(slab1_end-slab1_start))
-    B_2 = (rho_prime/tau_prime * A_3 * 1/tau_prime * B_3) * \
+    B_2 = (rho_prime/tau_prime * A_3 + 1/tau_prime * B_3) * \
         np.exp(-1j*k_slab*(slab1_end-slab1_start))
     A_1 = (1/tau * A_2 + rho/tau * B_2) * \
         np.exp(1j*k_air*slab1_start)
     B_1 = (rho/tau * A_2 + 1/tau * B_2) * \
         np.exp(-1j*k_air*slab1_start)
 
-    # Calculate fields to the right and to the left for all z using propagation
+    # Calculate waves to the right and to the left for all z using propagation
     E_1r = A_1*np.exp(-1j*np.outer(k_air, z_1)).T
     E_1l = B_1*np.exp(1j*np.outer(k_air, z_1)).T
     E_2r = A_2*np.exp(-1j*np.outer(k_slab, z_2)).T
