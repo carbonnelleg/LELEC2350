@@ -4,15 +4,14 @@ Created on Mon Mar  3 18:36:18 2025
 
 @author: carbonnelleg
 """
-
+from typing import Iterable
 import numpy as np
 from scipy.constants import epsilon_0, mu_0
-import matplotlib.pyplot as plt
+from scipy import signal as sg
+from matplotlib import pyplot as plt
 from matplotlib.widgets import Slider
-from typing import Iterable
 from matplotlib.artist import Artist
 from matplotlib.animation import FuncAnimation
-from scipy import signal as sg
 
 """
 _______________________________________________________________________________
@@ -27,7 +26,7 @@ slab1_start, slab1_end = 2., 4.
 slab2_start, slab2_end = 6., 8.
 
 t_min = 0.
-t_max = 1.5e-7
+t_max = 1.6e-7
 t_step = 1.0e-10
 t = np.arange(t_min, t_max, t_step)
 t_indices = np.arange(t.size)
@@ -44,7 +43,8 @@ spect = np.convolve(f_step/(2*sigma_f_0*np.sqrt(2*np.pi)) *
                     (np.abs(np.abs(freqs) - f_0) < f_step/2), spect, mode='same')
 
 eps_air = epsilon_0
-eps_slab = 4 * epsilon_0
+eps_rel = 4
+eps_slab = eps_rel * epsilon_0
 """
 End of variable declaration
 _______________________________________________________________________________
@@ -61,27 +61,31 @@ tau_prime = 1 + rho_prime
 
 def update_slab(d1, d2, d3, d4):
     """
-    Notes
-    -----
+    Parameters
+    ----------
+    d1 : float
+        Slab 1 start position
+    d2 : float
+        Slab 1 end position
+    d3 : float
+        Slab 2 start position
+    d4 : float
+        Slab 2 end position
 
-    On the simulation, it seems like wave packets are sent from the left at t != 0 such that any
-    wave to the left incident to an interface will be encountering a wave to the right at
-    the same moment. Those two waves will cancel out such that only a resulting wave to the
-    left will be produced. It is not intended to work like that and my guess is that it has something
-    to do with the fact that we are working in the frequency domain and then performing an FFT.
-
-    Solution
-    --------
-
-    This is due to the fact that A_ is imposed, whereas A_1 should be imposed to produce the expected result.
-    Now, it is only a matter of rewriting this function in matricial form where A_1=np.ones_like(freqs) and
-    solving for the other forward and backward fields.
+    Returns
+    -------
+    is_slab : np.ndarray[bool], shape = (z.size,)
+        True where z is inside a slab
+    E_r : np.ndarray[np.complex128], shape = (z.size, t.size)
+        Electric field of the wave going to the right, function of (z, t)
+    E_l : np.ndarray[np.complex128]
+        Electric field of the wave going to the left, function of (z, t)
     """
     # Define air and slab region
     is_slab = ((z > d1) & (z < d2)) | \
               ((z > d3) & (z < d4))
 
-    # Define local variables for 5 consecutive layers
+    # Define local space variables for 5 consecutive layers
     z_local = [
         z[(z <= d1).nonzero()],
         z[((z > d1) & (z < d2)).nonzero()] - d1,
@@ -90,41 +94,44 @@ def update_slab(d1, d2, d3, d4):
         z[(z >= d4).nonzero()] - d4
     ]
 
-    # Define wavenumber in both media, only dependent on freq
+    # Define wavenumber in both media, function of (freqs)
     k_air = 2*np.pi*freqs*np.sqrt(eps_air * mu_0)
     k_slab = 2*np.pi*freqs*np.sqrt(eps_slab * mu_0)
 
-    # Calculate Gamma at z=0
+    # Calculate Gamma at z=0, function of (freqs)
     Gamma = np.zeros_like(freqs, dtype=np.complex128)
     for (k, l, r) in zip(
-        [k_slab, k_air, k_slab, k_air],
-        [d4 - d3, d3 - d2, d2 - d1, d1],
-        [rho_prime, rho, rho_prime, rho]):
+            [k_slab, k_air, k_slab, k_air],
+            [d4 - d3, d3 - d2, d2 - d1, d1],
+            [rho_prime, rho, rho_prime, rho]):
 
         Gamma = np.exp(-2j*k*l) * (r + Gamma) / (1 + r*Gamma)
 
-    # Calculate forward (A) and backward (B) fields, only dependent on freq
+    # Calculate 5 forward (A) and backward (B) fields at the start of each z_local,
+    # function of (freqs)
     A = np.zeros((5, freqs.size), dtype=np.complex128)
     B = np.zeros((5, freqs.size), dtype=np.complex128)
     A[0] += 1.
     B[0] = A[0] * Gamma
     for i, (k, l, r, t) in enumerate(zip(
-        [k_air, k_slab, k_air, k_slab],
-        [d1, d2 - d1, d3 - d2, d4 - d3],
-        [rho_prime, rho, rho_prime, rho],
+            [k_air, k_slab, k_air, k_slab],
+            [d1, d2 - d1, d3 - d2, d4 - d3],
+            [rho_prime, rho, rho_prime, rho],
             [tau_prime, tau, tau_prime, tau])):
 
         A[i+1] = 1/t * np.exp(-1j*k*l) * A[i] + r/t * np.exp(1j*k*l) * B[i]
         B[i+1] = r/t * np.exp(-1j*k*l) * A[i] + 1/t * np.exp(1j*k*l) * B[i]
 
-    # Calculate waves to the right (E_r) and to the left (E_l) for all z using propagation
+    # Calculate waves to the right (E_r) and to the left (E_l) using wave function,
+    # function of (freqs, z_local)
     E_r = []
     E_l = []
     for i, k in enumerate([k_air, k_slab, k_air, k_slab, k_air]):
+
         E_r.append(A[i] * np.exp(-1j*np.outer(k, z_local[i])).T)
         E_l.append(B[i] * np.exp(1j*np.outer(k, z_local[i])).T)
 
-    # Concatenate both fields and perform
+    # Concatenate consecutive waves and perform IFFT
     E_r = np.concatenate(E_r, axis=0)
     E_r = np.fft.ifft(np.fft.ifftshift(E_r * spect, axes=1), norm='forward')
     E_l = np.concatenate(E_l, axis=0)
@@ -138,9 +145,10 @@ is_slab, E_r, E_l = update_slab(
 
 fig, ax = plt.subplots()
 plt.subplots_adjust(bottom=0.2)
-slab_line, = ax.plot(z, -1+2 * is_slab, label='Slab Region')
-E_r_line, = ax.plot([], [], label=r'$E_+$')
-E_l_line, = ax.plot([], [], label=r'$E_-$')
+slab_poly = ax.fill_between(z, -1., y2=1., where=is_slab, facecolor='lightgrey',
+                            alpha=.5, label=r'Slab ($\varepsilon_r$ = 'f'{eps_rel:.2f})')
+E_r_line, = ax.plot([], [], color='blue', label=r'$E_+$')
+E_l_line, = ax.plot([], [], color='red', label=r'$E_-$')
 
 ax_slider = fig.add_axes([0.2, 0.05, 0.65, 0.03])
 slider = Slider(ax_slider, label='Slab 2 Start Pos',
@@ -150,16 +158,16 @@ slider = Slider(ax_slider, label='Slab 2 Start Pos',
 
 
 def update_slider(val):
-    new_slab2_start = slider.val
+    new_slab2_start = val
     new_slab2_end = new_slab2_start + slab2_end - slab2_start
     global E_r, E_l
-    new_is_slab, E_r, E_l = update_slab(
+    is_slab, E_r, E_l = update_slab(
         slab1_start, slab1_end, new_slab2_start, new_slab2_end)
-    slab_line.set_ydata(-1+2*new_is_slab)
+    slab_poly.set_data(z, -1., 1., where=is_slab)
     fig.canvas.draw_idle()
 
 
-def init_fig():
+def init_fig() -> Iterable[Artist]:
     ax.set_xlabel('Distance [m]')
     ax.set_xlim((z_min, z_max))
     ax.set_ylim((-1.1, 1.1))
