@@ -34,29 +34,34 @@ t_indices = np.arange(t.size)
 f_s = 1/t_step
 f_step = f_s/t.size
 
-f_0 = 3.0e9
-sigma_f_0 = 0.3e9
-
 freqs = np.fft.ifftshift(np.fft.fftfreq(t.size, d=t_step))
-spect = sg.windows.gaussian(t.size, std=sigma_f_0/f_step)
-spect = np.convolve(f_step/(2*sigma_f_0*np.sqrt(2*np.pi)) *
-                    (np.abs(np.abs(freqs) - f_0) < f_step/2), spect, mode='same')
+
+# (Un)Comment these lines to change spectrum
+# f_0 = 3.0e9
+# sigma_f_0 = 0.3e9
+# spect = sg.windows.gaussian(t.size, std=sigma_f_0/f_step)                         
+# spect = np.convolve(f_step/(2*sigma_f_0*np.sqrt(2*np.pi)) *
+#                     (np.abs(np.abs(freqs) - f_0) < f_step/2), spect, mode='same')
+
+# (Un)Comment these lines to change spectrum
+f_0 = 1.0e9
+spect = 1/2 * (np.abs(np.abs(freqs) - f_0) < f_step/2)
 
 eps_air = epsilon_0
-eps_rel = 4
+eps_rel = 4.
 eps_slab = eps_rel * epsilon_0
-"""
-End of variable declaration
-_______________________________________________________________________________
-"""
 
 eta = np.sqrt(mu_0/eps_air)
-eta_prime = np.sqrt(mu_0/eps_slab)
+eta_prime = eta / np.sqrt(eps_rel)
 
 rho = (eta_prime - eta) / (eta_prime + eta)
 tau = 1 + rho
 rho_prime = -rho
 tau_prime = 1 + rho_prime
+"""
+End of variable declaration
+_______________________________________________________________________________
+"""
 
 
 def update_slab(d1, d2, d3, d4):
@@ -75,15 +80,14 @@ def update_slab(d1, d2, d3, d4):
     Returns
     -------
     is_slab : np.ndarray[bool], shape = (z.size,)
-        True where z is inside a slab
+        True where z is inside a slab, function of (z)
     E_r : np.ndarray[np.complex128], shape = (z.size, t.size)
         Electric field of the wave going to the right, function of (z, t)
     E_l : np.ndarray[np.complex128]
         Electric field of the wave going to the left, function of (z, t)
     """
-    # Define air and slab region
-    is_slab = ((z > d1) & (z < d2)) | \
-              ((z > d3) & (z < d4))
+    # Define slab region, function of (z)
+    is_slab = ((z > d1) & (z < d2)) | ((z > d3) & (z < d4))
 
     # Define local space variables for 5 consecutive layers
     z_local = [
@@ -140,17 +144,26 @@ def update_slab(d1, d2, d3, d4):
     return is_slab, E_r, E_l
 
 
+fig1, ax = plt.subplots(num='Spectrum')
+ax.stem(2*np.pi*freqs, spect,
+        label=r'$\hat{E}_{0+} (z=0, \omega)$', markerfmt='b.', linefmt='blue')
+ax.set_xlabel(r'$\omega$ [rad/s]')
+ax.set_xticks(2*np.pi*np.array([0, f_0, -f_0]),
+              labels=[0, r'$\omega_0$', r'$-\omega_0$'])
+ax.legend()
+fig1.suptitle('Frequency domain')
+
 is_slab, E_r, E_l = update_slab(
     slab1_start, slab1_end, slab2_start, slab2_end)
 
-fig, ax = plt.subplots()
-plt.subplots_adjust(bottom=0.2)
+fig2, ax = plt.subplots(num='Waves through slabs')
+fig2.subplots_adjust(bottom=0.2)
 slab_poly = ax.fill_between(z, -1., y2=1., where=is_slab, facecolor='lightgrey',
                             alpha=.5, label=r'Slab ($\varepsilon_r$ = 'f'{eps_rel:.2f})')
 E_r_line, = ax.plot([], [], color='blue', label=r'$E_+$')
 E_l_line, = ax.plot([], [], color='red', label=r'$E_-$')
 
-ax_slider = fig.add_axes([0.2, 0.05, 0.65, 0.03])
+ax_slider = fig2.add_axes([0.2, 0.05, 0.65, 0.03])
 slider = Slider(ax_slider, label='Slab 2 Start Pos',
                 valmin=slab1_end + z_step,
                 valmax=z_max - slab2_end + slab2_start,
@@ -164,7 +177,7 @@ def update_slider(val):
     is_slab, E_r, E_l = update_slab(
         slab1_start, slab1_end, new_slab2_start, new_slab2_end)
     slab_poly.set_data(z, -1., 1., where=is_slab)
-    fig.canvas.draw_idle()
+    fig2.canvas.draw_idle()
 
 
 def init_fig() -> Iterable[Artist]:
@@ -178,11 +191,11 @@ def update_fig(t_i) -> Iterable[Artist]:
     E_r_line.set_data(z, E_r[:, t_i].real)
     E_l_line.set_data(z, E_l[:, t_i].real)
     ax.legend(loc=1)
-    fig.suptitle(f't = {t[t_i]:.2e} s')
+    fig2.suptitle(f't = {t[t_i]:.2e} s')
     return E_r_line, E_l_line
 
 
 slider.on_changed(update_slider)
-anim = FuncAnimation(fig, update_fig, frames=t_indices,
+anim = FuncAnimation(fig2, update_fig, frames=t_indices,
                      init_func=init_fig, interval=10)
 plt.show()
