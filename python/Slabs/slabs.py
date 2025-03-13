@@ -146,6 +146,7 @@ class Simulation:
         ax.set_xticks(2*np.pi*np.array([0, self.f_0, -self.f_0]),
                       labels=[0, r'$\omega_0$', r'$-\omega_0$'])
         ax.legend()
+        ax.set_title(fr'$f_0$ = {self.f_0:.1e}')
         fig.suptitle('Frequency domain')
         self.fig1 = fig
         self.ax1 = ax
