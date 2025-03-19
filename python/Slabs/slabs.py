@@ -28,7 +28,8 @@ t_min = 0.
 t_max = 1.6e-7
 t_step = 1.0e-10
 
-f_0 = 3.0e9
+single_freq_f_0 = 0.5e9
+wave_packet_f_0 = 3.0e9
 sigma_f_0 = 0.3e9
 
 eps_rel = 4.
@@ -56,7 +57,7 @@ class Simulation:
                  t_step=t_step,
                  # Spectrum initialization
                  single_freq=False,
-                 f_0=f_0,
+                 f_0=None,
                  sigma_f_0=sigma_f_0,
                  # Physical parameters
                  eps_air=epsilon_0,
@@ -86,8 +87,8 @@ class Simulation:
         self.freqs = np.fft.ifftshift(
             np.fft.fftfreq(self.t.size, d=self.t_step))
         if f_0 is None:
-            if single_freq: f_0 = .5e9
-            else: f_0 = 3.e9
+            if single_freq: f_0 = single_freq_f_0
+            else: f_0 = wave_packet_f_0
         self.f_0 = f_0
         if single_freq:
             # FT of single frequency is 2 deltas at +/- f_0
@@ -328,7 +329,7 @@ class Simulation:
 def parse_args(arg_list: list[str] = None):
     parser = argparse.ArgumentParser(
         description='Run a simulation of EM waves through slabs with different permittivities',
-        usage='python slabs.py [SIMULATION_PARAMETERS]')
+        usage='python %(prog)s [SIMULATION_PARAMETERS]')
     
     sim_group = parser.add_argument_group("Simulation Parameters")
     sim_group.add_argument('-0', '--single_freq', action='store_true',
