@@ -6,27 +6,39 @@ Created on Mon Mar  3 18:36:18 2025
 """
 from typing import Iterable
 import argparse
+from tqdm import tqdm
 import numpy as np
 from scipy.constants import epsilon_0, mu_0
 from scipy import signal as sg
+import matplotlib as mpl
 from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation
-from matplotlib.widgets import Slider, Button, CheckButtons
+from matplotlib.widgets import Slider, Button, RadioButtons
 
 """
 _______________________________________________________________________________
 Declaring variables
 """
-z_min = 0.
-z_max = 10.
-z_step = 4.0e-3
+x_min = -2.5
+x_max = 2.5
 
-slab1_start, slab1_end = 2., 4.
-slab2_start, slab2_end = 6., 8.
+z_min = 0.
+z_max = 5.
+
+# Setting steps to None will automatically choose appropriate values according to the simulation type
+x_step = None
+z_step = None
+
+slab1_end = 1.
+slab2_start, slab2_end = 2.5, 3.5
+
+theta = 0. # [°]
 
 t_min = 0.
-t_max = 1.6e-7
 t_step = 1.0e-10
+
+# Setting t_max to None will automatically choose appropriate value for t_max and f_step according to the simulation type
+t_max = None
 
 single_freq_f_0 = 0.5e9
 wave_packet_f_0 = 3.0e9
@@ -41,289 +53,712 @@ _______________________________________________________________________________
 
 class Simulation:
 
-    def __init__(self,
-                 # Space grid initialization
-                 z_min=z_min,
-                 z_max=z_max,
-                 z_step=z_step,
-                 # Initial positions of the slabs
-                 slab1_start=slab1_start,
-                 slab1_end=slab1_end,
-                 slab2_start=slab2_start,
-                 slab2_end=slab2_end,
-                 # Time grid initialization
-                 t_min=t_min,
-                 t_max=t_max,
-                 t_step=t_step,
-                 # Spectrum initialization
-                 single_freq=False,
-                 f_0=None,
-                 sigma_f_0=sigma_f_0,
-                 # Physical parameters
-                 eps_air=epsilon_0,
-                 eps_rel=eps_rel,
-                 mu_0=mu_0,
-                 **kwargs):
+    def __init__(
+        self,
         # Space grid initialization
+        x_min=x_min,
+        x_max=x_max,
+        z_min=z_min,
+        z_max=z_max,
+        x_step=x_step,
+        z_step=z_step,
+        # Initial positions of the slabs
+        slab1_end=slab1_end,
+        slab2_start=slab2_start,
+        slab2_end=slab2_end,
+        # Initial incident angle
+        theta=theta,
+        # Time grid initialization
+        t_min=t_min,
+        t_step=t_step,
+        t_max=None,
+        # Spectrum initialization
+        single_freq=False,
+        f_0=None,
+        sigma_f_0=sigma_f_0,
+        # Physical parameters
+        eps_air=epsilon_0,
+        eps_rel=eps_rel,
+        mu_0=mu_0,
+        # 1D simulation or 2D simulation
+        is_2D=False,
+        # Possibility of adding sliders and buttons
+        sliders_and_buttons=False,
+        **kwargs
+    ):
+        self.is_2D = is_2D
+        self.single_freq = single_freq
+
+        # Space grid initialization
+        self.x_min = x_min
+        self.x_max = x_max
         self.z_min = z_min
         self.z_max = z_max
+        self.x_step = x_step
         self.z_step = z_step
-        self.z = np.arange(z_min, z_max, z_step)
+
         # Initial positions of the slabs
-        self.slab1_start = slab1_start
         self.slab1_end = slab1_end
         self.slab2_start = slab2_start
         self.slab2_end = slab2_end
+
         # Time grid initialization
+        # Time array should preferably be of length 2**N
         self.t_min = t_min
-        self.t_max = t_max
         self.t_step = t_step
-        self.t = np.arange(t_min, t_max, t_step)
-        self.t_indices = np.arange(self.t.size)
+        self.t_max = t_max
+
         # Spectrum initialization
-        self.single_freq = single_freq
         self.f_s = 1/t_step
-        self.f_step = self.f_s/self.t.size
-        self.freqs = np.fft.ifftshift(
-            np.fft.fftfreq(self.t.size, d=self.t_step))
         if f_0 is None:
             if single_freq: f_0 = single_freq_f_0
             else: f_0 = wave_packet_f_0
         self.f_0 = f_0
-        if single_freq:
-            # FT of single frequency is 2 deltas at +/- f_0
-            self.spect = 1/2 * \
-                (np.abs(np.abs(self.freqs) - f_0) < self.f_step/2)
-        else:
-            # Gaussian window, shifted around +/- f_0, normalized
-            self.spect = sg.windows.gaussian(
-                self.t.size, std=sigma_f_0/self.f_step)
-            self.spect = np.convolve(
-                np.abs(np.abs(self.freqs) - f_0) < self.f_step/2,
-                self.spect, mode='same')
-            self.spect *= self.f_step/(2*sigma_f_0*np.sqrt(2*np.pi))
+        self.sigma_f_0 = sigma_f_0
+
+        # Initial incident angle
+        self.theta = np.deg2rad(theta)
+
+        # Direction vectors in (z, x)
+        # dependent on (theta)
+        self.k_r = np.array([0. + 0.j, 0. + 0.j])
+        self.k_l = np.array([0. + 0.j, 0. + 0.j])
+        self.k_prime_r = np.array([0. + 0.j, 0. + 0.j])
+        self.k_prime_l = np.array([0. + 0.j, 0. + 0.j])
+
         # Physical parameters
         self.eps_air = eps_air
         self.eps_rel = eps_rel
         self.eps_slab = eps_rel * eps_air
         self.mu_0 = mu_0
         # Impedances
+        # dependent on (theta)
         self.eta = np.sqrt(mu_0/eps_air)
         self.eta_prime = self.eta / np.sqrt(eps_rel)
+        self.eta_TE, self.eta_prime_TE = 0. + 0.j, 0. + 0.j
+        self.eta_TM, self.eta_prime_TM = 0 + 0.j, 0. + 0.j
         # Reflexion and transmission coefficients
-        self.rho = (self.eta_prime - self.eta) / (self.eta_prime + self.eta)
-        self.tau = 1 + self.rho
-        self.rho_prime = -self.rho
-        self.tau_prime = 1 + self.rho_prime
+        # dependent on (theta)
+        self.rho_TE, self.rho_prime_TE = 0. + 0.j, 0. + 0.j
+        self.tau_TE, self.tau_prime_TE = 0. + 0.j, 0. + 0.j
+        self.rho_TM, self.rho_prime_TM = 0. + 0.j, 0. + 0.j
+        self.tau_TM, self.tau_prime_TM = 0. + 0.j, 0. + 0.j
+
+        # Update direction vectors and reflexion and transmission coefficients for current (theta)
+        self.update_theta()
         # Initialize arrays
         self._init_arrays(**kwargs)
         # Initialize matplotlib figures
         self._init_figs(**kwargs)
+        # Initialize buttons and sliders
+        self.sliders_and_buttons = sliders_and_buttons
+        if sliders_and_buttons:
+            self._init_sliders_buttons(**kwargs)
 
     def _init_arrays(self, **kwargs):
+        # Choose appropriate x_step
+        if self.x_step is None:
+            if self.is_2D and not self.single_freq:
+                x_step = (self.x_max-self.x_min)/250
+            else:
+                x_step = (self.x_max-self.x_min)/400
+        else:
+            x_step = self.x_step
+        
+        # Choose appropriate z_step
+        if self.z_step is None:
+            if self.is_2D and not self.single_freq:
+                z_step = (self.z_max-self.z_min)/250
+            else:
+                z_step = (self.z_max-self.z_min)/400
+        else:
+            z_step = self.z_step
+        
+        # Choose appropriate t_max and f_step
+        if self.t_max is None:
+            if self.single_freq:
+                t_max = self.t_min + 128*self.t_step
+            else:
+                if self.is_2D:
+                    t_max = self.t_min + 512*self.t_step
+                else:
+                    t_max = self.t_min + 1024*self.t_step
+        else:
+            t_max = self.t_max
+        self.f_step = 1 / (t_max-self.t_min)
+        
+        # Space grid initialization
+        if self.is_2D:
+            self.x, self.z = np.meshgrid(np.arange(self.x_min, self.x_max, x_step),
+                                         np.arange(self.z_min, self.z_max, z_step))
+            self.X, self.Z = np.meshgrid(np.arange(self.x_min, self.x_max+x_step, x_step),
+                                         np.arange(self.z_min, self.z_max+z_step, z_step))
+        else:
+            self.z = np.arange(self.z_min, self.z_max, z_step)
+        
+        # Time grid initialization
+        self.t = np.arange(self.t_min, t_max, self.t_step)
+        self.t_indices = np.arange(self.t.size, dtype=np.uint16)
+
+        # Spectrum initialization
+        self.freqs = np.fft.ifftshift(
+            np.fft.fftfreq(self.t.size, d=self.t_step))
+        if self.single_freq:
+            # FT of single frequency is 2 deltas at +/- f_0
+            self.spect = 1/2 * \
+                (np.abs(np.abs(self.freqs) - self.f_0) < self.f_step/2)
+        else:
+            # Gaussian window, shifted around +/- f_0, normalized
+            self.spect = sg.windows.gaussian(
+                self.t.size, std=self.sigma_f_0/self.f_step)
+            self.spect = np.convolve(
+                np.abs(np.abs(self.freqs) - self.f_0) < self.f_step/2,
+                self.spect, mode='same')
+            self.spect *= self.f_step/(2*self.sigma_f_0*np.sqrt(2*np.pi))
+        self.spect = self.spect.astype(np.complex128)
+        self.spect *= np.sqrt(2)/2 * np.exp(-1j*self.freqs*self.t_min)
+
         # Arrays function of (z)
-        self.is_slab = ((self.z > self.slab1_start) & (self.z < self.slab1_end)) | \
-                       ((self.z > self.slab2_start) & (self.z < self.slab2_end))
+        self.is_slab = self.get_is_slab()
         # Arrays function of (freqs)
         self.k_air = 2*np.pi*self.freqs*np.sqrt(self.eps_air * self.mu_0)
         self.k_slab = 2*np.pi*self.freqs*np.sqrt(self.eps_slab * self.mu_0)
-        self.Gamma = np.zeros_like(self.freqs, dtype=np.complex128)
-        self.A = np.zeros((5, self.freqs.size), dtype=np.complex128)
-        self.A[0] += 1.
-        self.B = np.zeros((5, self.freqs.size), dtype=np.complex128)
+        self.Gamma_TE = np.zeros_like(self.freqs, dtype=np.complex128)
+        self.Gamma_TM = np.zeros_like(self.freqs, dtype=np.complex128)
+        self.A_TE = np.zeros((4, self.freqs.size), dtype=np.complex128)
+        self.A_TE[0] += 1.
+        self.B_TE = np.zeros((4, self.freqs.size), dtype=np.complex128)
+        self.A_TM = np.zeros((4, self.freqs.size), dtype=np.complex128)
+        self.A_TM[0] += 1.
+        self.B_TM = np.zeros((4, self.freqs.size), dtype=np.complex128)
         # Arrays function of (z, freqs)
-        self.E_r = np.zeros((self.z.size, self.freqs.size),
-                            dtype=np.complex128)
-        self.E_l = np.zeros((self.z.size, self.freqs.size),
-                            dtype=np.complex128)
+        self.E_r_TE = np.zeros((*self.z.shape, *self.freqs.shape),
+                               dtype=np.complex128)
+        self.E_l_TE = np.zeros((*self.z.shape, *self.freqs.shape),
+                               dtype=np.complex128)
+        self.E_r_TM = np.zeros((*self.z.shape, *self.freqs.shape),
+                               dtype=np.complex128)
+        self.E_l_TM = np.zeros((*self.z.shape, *self.freqs.shape),
+                               dtype=np.complex128)
+    
+    def print_array_memory_size(self):
+        print('Arrays memory size:')
+        print('________________________')
+        print(f'{self.z.nbytes=}')
+        if self.is_2D:
+            print(f'{self.x.nbytes=}')
+            print(f'{self.Z.nbytes=}')
+            print(f'{self.X.nbytes=}')
+        print(f'{self.t.nbytes=}')
+        print(f'{self.t_indices.nbytes=}')
+        print(f'{self.freqs.nbytes=}')
+        print(f'{self.spect.nbytes=}')
+        print(f'{self.is_slab.nbytes=}')
+        print(f'{self.k_air.nbytes=}')
+        print(f'{self.k_slab.nbytes=}')
+        print(f'{self.Gamma_TE.nbytes=}')
+        print(f'{self.Gamma_TM.nbytes=}')
+        print(f'{self.A_TE.nbytes=}')
+        print(f'{self.A_TM.nbytes=}')
+        print(f'{self.B_TE.nbytes=}')
+        print(f'{self.B_TM.nbytes=}')
+        print(f'{self.E_r_TE.nbytes=}')
+        print(f'{self.E_r_TM.nbytes=}')
+        print(f'{self.E_l_TE.nbytes=}')
+        print(f'{self.E_l_TM.nbytes=}')
+        print('________________________')
+        print('Total array memory size:')
+        total_n_bytes = self.z.nbytes + self.t.nbytes + self.t_indices.nbytes + \
+                        self.freqs.nbytes + self.spect.nbytes + self.is_slab.nbytes + \
+                        self.k_air.nbytes + self.k_slab.nbytes + self.Gamma_TE.nbytes + \
+                        self.Gamma_TM.nbytes + self.A_TE.nbytes + self.A_TM.nbytes + \
+                        self.B_TE.nbytes + self.B_TM.nbytes + self.E_r_TE.nbytes +\
+                        self.E_r_TM.nbytes + self.E_l_TE.nbytes + self.E_l_TM.nbytes
+        if self.is_2D:
+            total_n_bytes += self.x.nbytes + self.Z.nbytes + self.X.nbytes
+
+        print(f'{total_n_bytes / 2**30:.2f} GiB')
 
     def _init_figs(self, **kwargs):
         # Figure of the spectrum
-        fig, ax = plt.subplots(num='Spectrum')
-        ax.stem(2*np.pi*self.freqs, self.spect,
-                label=r'$\hat{E}_{0+} (z=0, \omega)$',
-                markerfmt='b.', linefmt='blue')
-        ax.set_xlabel(r'$\omega$ [rad/s]')
-        ax.set_xticks(2*np.pi*np.array([0, self.f_0, -self.f_0]),
-                      labels=[0, r'$\omega_0$', r'$-\omega_0$'])
-        ax.legend()
-        ax.set_title(fr'$f_0$ = {self.f_0:.1e}')
-        fig.suptitle('Frequency domain')
-        self.fig1 = fig
-        self.ax1 = ax
+        # ______________________________________________________________________
+        self.fig1, self.ax1 = plt.subplots(num='Spectrum')
+        self.ax1.stem(2*np.pi*self.freqs, np.abs(self.spect),
+                      label=r'$\left.\hat{E}_{0+}\right|_{z=0, x=0}\,(\omega)$',
+                      markerfmt='b.', linefmt='blue', basefmt='blue')
+        self.ax1.set_xlabel(r'$\omega$ [rad/s]')
+        self.ax1.set_xticks(2*np.pi*np.array([0, self.f_0, -self.f_0]),
+                            labels=[0, r'$\omega_0$', r'$-\omega_0$'])
+        self.ax1.legend()
+        self.ax1.set_title(fr'$f_0$ = {self.f_0:.1e}')
+        self.fig1.suptitle('Frequency domain')
+        # ______________________________________________________________________
 
-        # Animated figure of the waves through slabs
-        fig, ax = plt.subplots(num='Waves through slabs')
-        fig.subplots_adjust(right=0.8, bottom=0.2)
-        # Initialize all artists
-        self.slab_poly = ax.fill_between(
-            self.z, -2., 2., where=self.is_slab, facecolor='grey',
-            alpha=.5, label=r'Slab ($\varepsilon_r$ = 'f'{self.eps_rel:.2f})')
-        self.E_r_line, = ax.plot([], [], color='blue', label=r'$E_+$')
-        self.E_l_line, = ax.plot([], [], color='red', label=r'$E_-$')
-        self.E_sum_line, = ax.plot([], [], color='green', visible=False,
-                                   label=r'$E = E_+ + E_-$')
-        self.E_sum_line.remove()
-        # Initialize slider
-        ax_slider = fig.add_axes([0.2, 0.05, 0.65, 0.03])
-        self.slider = Slider(
-            ax_slider, label='Slab 2 Start Pos',
-            valmin=self.slab1_end + self.z_step,
+        # Animated figures of the waves through slabs
+        # (z, x)-dimension plot, animated over time
+        # ______________________________________________________________________
+        if self.is_2D:
+            self.fig2, self.ax2 = plt.subplots(num='2D Waves through slabs')
+            self.fig2.subplots_adjust(right=0.85)
+            # Initialize collections
+            vmax = 2. if self.single_freq else 1.
+            self.E_TE_mesh = self.ax2.pcolormesh(self.Z, self.X, np.zeros_like(self.z), cmap='Blues',
+                                                       shading='flat', alpha=.8, vmin=0., vmax=vmax)
+            self.E_TM_mesh = self.ax2.pcolormesh(self.Z, self.X, np.zeros_like(self.z), cmap='Reds',
+                                                       shading='flat', alpha=.8, vmin=0., vmax=vmax)
+            self.E_45_mesh = self.ax2.pcolormesh(self.Z, self.X, np.zeros_like(self.z), cmap='Greens',
+                                                    shading='flat', alpha=.8, vmin=0., vmax=vmax)
+            for col in self.ax2.collections:
+                col.set_visible(False)
+            # Choose which polarization to show
+            # self.E_TE_mesh.set_visible(True)
+            # self.E_TM_mesh.set_visible(True)
+            self.E_45_mesh.set_visible(True)
+            # Add colorbar
+            self.cbar = self.fig2.colorbar(self.E_45_mesh, ax=self.ax2, fraction=0.046, pad=0.04)
+            self.cbar.set_label('E-field magnitude')
+            # Add horizontal and vertical lines
+            self.d1_vline = self.ax2.axvline(self.slab1_end, ls="--", lw=1., c="black")
+            self.d2_vline = self.ax2.axvline(self.slab2_start, ls="--", lw=1., c="black")
+            self.d3_vline = self.ax2.axvline(self.slab2_end, ls="--", lw=1., c="black")
+            # Add arrow
+            self.arrow_l = (self.z_max-self.z_min)/10
+            self.arrow = self.ax2.arrow(self.z_min, (self.x_max+self.x_min)/2,
+                                        dx=self.arrow_l*self.k_prime_r[0].real,
+                                        dy=self.arrow_l*self.k_prime_r[1].real,
+                                        width=0.05, length_includes_head=True,
+                                        fc='black', ec='black')
+            # Labels and limits
+            self.ax2.set_xlabel('z position [m]')
+            self.ax2.set_ylabel('x position [m]')
+            self.ax2.set_xlim([self.z_min, self.z_max])
+            self.ax2.set_ylim([self.x_min, self.x_max])
+        # ______________________________________________________________________
+
+        # z-dimension plot, animated over time
+        # ______________________________________________________________________
+        else:
+            self.fig2, self.ax2 = plt.subplots(num='1D Waves through slabs')
+            # Initialize lines
+            self.slab_poly = self.ax2.fill_between(
+                self.z, -2., 2., where=self.is_slab, facecolor='grey',
+                alpha=.5, label=r'Slab ($\varepsilon_r$ = 'f'{self.eps_rel:.2f})')
+            self.E_r_TE_line, = self.ax2.plot(self.z, np.take(self.E_r_TE, 0, axis=-1).real,
+                                              color='blue')
+            self.E_l_TE_line, = self.ax2.plot(self.z, np.take(self.E_r_TE, 0, axis=-1).real,
+                                              color='red')
+            self.E_sum_TE_line, = self.ax2.plot(self.z, np.take(self.E_r_TE, 0, axis=-1).real,
+                                                color='green')
+            self.E_r_TM_line, = self.ax2.plot(self.z, np.take(self.E_r_TE, 0, axis=-1).real,
+                                              color='blue')
+            self.E_l_TM_line, = self.ax2.plot(self.z, np.take(self.E_r_TE, 0, axis=-1).real,
+                                              color='red')
+            self.E_sum_TM_line, = self.ax2.plot(self.z, np.take(self.E_r_TE, 0, axis=-1).real,
+                                                color='green')
+            self.E_r_45_line, = self.ax2.plot(self.z, np.take(self.E_r_TE, 0, axis=-1).real,
+                                              color='blue')
+            self.E_l_45_line, = self.ax2.plot(self.z, np.take(self.E_r_TE, 0, axis=-1).real,
+                                              color='red')
+            self.E_sum_45_line, = self.ax2.plot(self.z, np.take(self.E_r_TE, 0, axis=-1).real,
+                                                color='green')
+            for line in self.ax2.lines:
+                line.set_visible(False)
+            # Choose which polarization to show
+            self.E_l_line = self.E_l_45_line
+            self.E_r_line = self.E_r_45_line
+            self.E_sum_line = self.E_sum_45_line
+            # self.E_l_line.set_visible(True)
+            # self.E_r_line.set_visible(True)
+            self.E_sum_line.set_visible(True)
+            # Labels and limits
+            self.ax2.set_xlabel('z position [m]')
+            self.ax2.set_xlim([self.z_min, self.z_max])
+            self.ax2.set_ylabel('E-field magnitude')
+            if self.single_freq:
+                self.ax2.set_ylim([-2, 2])
+            else:
+                self.ax2.set_ylim([-1.1, 1.1])
+        # ______________________________________________________________________
+        self.ax2_title = self.ax2.set_title(f't = {self.t[0]:.2e} s', y=.9,
+                                            bbox=dict(facecolor='lightgrey', alpha=1.))
+    
+    def _init_sliders_buttons(self, **kwargs):
+        # Adjust position of plots
+        self.fig2.subplots_adjust(right=0.7, bottom=0.25)
+
+        # Update function for slab2 starting position
+        def update_slab2_slider(val):
+            self.slab2_end = val + self.slab2_end - self.slab2_start
+            self.slab2_start = val
+            # Update slab region, function of (z)
+            self.is_slab = self.get_is_slab()
+            if self.is_2D:
+                self.d2_vline.set_xdata([self.slab2_start, self.slab2_start])
+                self.d3_vline.set_xdata([self.slab2_end, self.slab2_end])
+            else:
+                self.slab_poly.set_data(self.z, -2., 2., where=self.is_slab)
+        
+        # Initialize slab2 slider
+        ax_slab2_slider = self.fig2.add_axes([0.2, 0.05, 0.65, 0.03])
+        self.slab2_slider = Slider(
+            ax_slab2_slider, label='Slab 2 Start Pos',
+            valmin=self.slab1_end,
             valmax=self.z_max - self.slab2_end + self.slab2_start,
             valinit=self.slab2_start)
-        # Initialize restart button
-        ax_restart_button = fig.add_axes([0.81, 0.2, 0.1, 0.05])
-        self.restart_button = Button(ax_restart_button, 'Restart')
-        # Initialize toggle button (Switch between E_r & E_l vs E_sum)
-        ax_check_buttons = fig.add_axes([0.81, 0.4, 0.18, 0.15])
-        self.check_buttons = CheckButtons(
-            ax_check_buttons, actives=[True, True, False],
-            labels=[r'$E_+$', r'$E_-$', r'$E = E_+ + E_-$'])
-        # Other figure features
-        ax.set_xlabel('Distance [m]')
-        ax.set_xlim([self.z_min, self.z_max])
-        if self.single_freq:
-            ax.set_ylim([-2.2, 2.2])
-        else:
-            ax.set_ylim([-1.1, 1.1])
-        self.fig2 = fig
-        self.ax2 = ax
+        self.slab2_slider.on_changed(update_slab2_slider)
+        
+        # Update function for theta value
+        def update_theta_slider(val):
+            self.theta = np.deg2rad(val)
+            self.update_theta()
+            if self.is_2D:
+                self.arrow.set_data(dx=self.arrow_l*self.k_prime_r[0].real,
+                                    dy=self.arrow_l*self.k_prime_r[1].real)
 
-    def update_slab(self):
+        # Initialize theta slider
+        ax_theta_slider = self.fig2.add_axes([0.2, 0.1, 0.65, 0.03])
+        self.theta_slider = Slider(
+            ax_theta_slider, label=r'$\theta$ [°]',
+            valmin=-90., valmax=90.,
+            closedmin=False, closedmax=False,
+            valinit=np.rad2deg(self.theta))
+        self.theta_slider.on_changed(update_theta_slider)
+
+        # Toggle function for 1D/2D figures
+        def toggle_1D_2D(event):
+            plt.close('all')
+            self.is_2D = not self.is_2D
+            self._init_arrays()
+            self._init_figs()
+            self._init_sliders_buttons()
+            plt.show()
+
+        # Initialize 1D/2D button
+        ax_1D_2D_button = self.fig2.add_axes([0.81, 0.9, 0.18, 0.05])
+        label = '1D' if self.is_2D else '2D'
+        self._1D_2D_button = Button(ax_1D_2D_button, label)
+        self._1D_2D_button.on_clicked(toggle_1D_2D)
+        
+        # Toggle function to update visibility of left-right fields
+        def toggle_left_right_display(label):
+            if label == r'$E_+$, $E_-$':
+                self.E_r_line.set_visible(True)
+                self.E_l_line.set_visible(True)
+                self.E_sum_line.set_visible(False)
+            elif label == r'$E_{tot}$':
+                self.E_r_line.set_visible(False)
+                self.E_l_line.set_visible(False)
+                self.E_sum_line.set_visible(True)
+            self.fig2.canvas.draw_idle()
+
+        # Initialize left-right radio button (E_r, E_l vs E_tot)
+        if not self.is_2D:
+            ax_left_right_radio_buttons = self.fig2.add_axes([0.81, 0.49, 0.18, 0.15])
+            self.left_right_radio_buttons = RadioButtons(
+                ax_left_right_radio_buttons, labels=[r'$E_+$, $E_-$', r'$E_{tot}$'],
+                active=1)
+            self.left_right_radio_buttons.on_clicked(toggle_left_right_display)
+
+        # Toggle function to update visibility of TE-TM modes
+        def toggle_TE_TM_display(label):
+            if self.is_2D:
+                if label == r'$E_{TE}$':
+                    self.E_TE_mesh.set_visible(True)
+                    self.E_TM_mesh.set_visible(False)
+                    self.E_45_mesh.set_visible(False)
+                    self.cbar.update_normal(self.E_TE_mesh)
+                elif label == r'$E_{TM}$':
+                    self.E_TE_mesh.set_visible(False)
+                    self.E_TM_mesh.set_visible(True)
+                    self.E_45_mesh.set_visible(False)
+                    self.cbar.update_normal(self.E_TM_mesh)
+                elif label == r'$E_{45}$':
+                    self.E_TE_mesh.set_visible(False)
+                    self.E_TM_mesh.set_visible(False)
+                    self.E_45_mesh.set_visible(True)
+                    self.cbar.update_normal(self.E_45_mesh)
+            else:
+                self.E_l_line.set_visible(False)
+                self.E_r_line.set_visible(False)
+                self.E_sum_line.set_visible(False)
+                if label == r'$E_{TE}$':
+                    self.E_l_line = self.E_l_TE_line
+                    self.E_r_line = self.E_r_TE_line
+                    self.E_sum_line = self.E_sum_TE_line
+                elif label == r'$E_{TM}$':
+                    self.E_l_line = self.E_l_TM_line
+                    self.E_r_line = self.E_r_TM_line
+                    self.E_sum_line = self.E_sum_TM_line
+                elif label == r'$E_{45}$':
+                    self.E_l_line = self.E_l_45_line
+                    self.E_r_line = self.E_r_45_line
+                    self.E_sum_line = self.E_sum_45_line
+                label = self.left_right_radio_buttons.value_selected
+                toggle_left_right_display(label)
+            self.fig2.canvas.draw_idle()
+
+        # Initialize TE-TM radio button (E_TE vs E_TM vs E_45°)
+        ax_TE_TM_radio_buttons = self.fig2.add_axes([0.81, 0.66, 0.18, 0.15])
+        self.TE_TM_radio_buttons = RadioButtons(
+                ax_TE_TM_radio_buttons, labels=[r'$E_{TE}$', r'$E_{TM}$', r'$E_{45}$'],
+                active=2)
+        self.TE_TM_radio_buttons.on_clicked(toggle_TE_TM_display)
+
+        # Toggle function for start/stop
+        def toggle_start_stop(event):
+            if self.start_stop_button.label.get_text() == 'Start':
+                self.start()
+            else:
+                self.stop()
+            self.fig2.canvas.draw_idle()
+        
+        # Initialize start/stop button
+        ax_start_stop_button = self.fig2.add_axes([0.81, 0.83, 0.18, 0.05])
+        self.start_stop_button = Button(ax_start_stop_button, 'Start')
+        self.start_stop_button.on_clicked(toggle_start_stop)
+
+        # Initialize pause/play button
+        if self.is_2D:
+            ax_pause_play_button = self.fig2.add_axes([0.81, 0.32, 0.18, 0.05])
+        else:
+            ax_pause_play_button = self.fig2.add_axes([0.81, 0.27, 0.18, 0.05])
+        self.pause_play_button = Button(ax_pause_play_button, 'Pause',
+                                        color='0.5', hovercolor='0.5')
+
+        # Initialize loop back button
+        if self.is_2D:
+            ax_loop_back_button = self.fig2.add_axes([0.81, 0.25, 0.18, 0.05])
+        else:
+            ax_loop_back_button = self.fig2.add_axes([0.81, 0.2, 0.18, 0.05])
+        self.loop_back_button = Button(ax_loop_back_button, 'Loop back',
+                                       color='0.5', hovercolor='0.5')
+
+    def update_theta(self):
+        th_s = np.complex128(self.theta)
+        th_0 = np.arcsin(np.sin(th_s) * np.sqrt(self.eps_rel))
+
+        # Updates direction vectors in (z, x)
+        self.k_r = np.array([np.cos(th_0),
+                             np.sin(th_0)])
+        self.k_l = np.array([-np.cos(th_0),
+                             np.sin(th_0)])
+        self.k_prime_r = np.array([np.cos(th_s),
+                                   np.sin(th_s)])
+        self.k_prime_l = np.array([-np.cos(th_s),
+                                   np.sin(th_s)])
+        
+        # Update impedances
+        self.eta_TE = self.eta/np.cos(th_0)
+        self.eta_TM = self.eta*np.cos(th_0)
+        self.eta_prime_TE = self.eta_prime/np.cos(th_s)
+        self.eta_prime_TM = self.eta_prime*np.cos(th_s)
+
+        # Updates reflexion and transmission coefficients
+        self.rho_TE = (self.eta_prime_TE - self.eta_TE) / \
+                      (self.eta_prime_TE + self.eta_TE)
+        self.tau_TE = 1 + self.rho_TE
+        self.rho_prime_TE = -self.rho_TE
+        self.tau_prime_TE = 1 + self.rho_prime_TE
+
+        self.rho_TM = (self.eta_prime_TM - self.eta_TM) / \
+                      (self.eta_prime_TM + self.eta_TM)
+        self.tau_TM = 1 + self.rho_TM
+        self.rho_prime_TM = -self.rho_TM
+        self.tau_prime_TM = 1 + self.rho_prime_TM
+
+    def get_is_slab(self):
+        return ((self.z < self.slab1_end)) | \
+               ((self.z > self.slab2_start) & (self.z < self.slab2_end))
+    
+    def update_arrays(self, *args):
         """
         Updates the different fields and waves of the simulation for the current
         slab positions.
-
-        Returns
-        -------
-        is_slab : np.ndarray[bool], shape = (z.size,)
-            True where z is inside a slab, function of (z)
-        E_r : np.ndarray[np.complex128], shape = (z.size, t.size)
-            Electric field of the wave going to the right, function of (z, t)
-        E_l : np.ndarray[np.complex128], shape = (z.size, t.size)
-            Electric field of the wave going to the left, function of (z, t)
         """
-        (d1, d2, d3, d4) = (self.slab1_start,
-                            self.slab1_end, self.slab2_start, self.slab2_end)
         z = self.z
-        (k_0, k_s) = (self.k_air, self.k_slab)
-        (r_0, r_s) = (self.rho, self.rho_prime)
-        (t_0, t_s) = (self.tau, self.tau_prime)
-
-        # Update slab region, function of (z)
-        self.is_slab = ((z > d1) & (z < d2)) | ((z > d3) & (z < d4))
-
+        # Positions
+        d1, d2, d3 = self.slab1_end, self.slab2_start, self.slab2_end
         # Define local space variables for 5 consecutive layers
         z_local = [
-            z[(z <= d1).nonzero()],
-            z[((z > d1) & (z < d2)).nonzero()] - d1,
-            z[((z >= d2) & (z <= d3)).nonzero()] - d2,
-            z[((z > d3) & (z < d4)).nonzero()] - d3,
-            z[(z >= d4).nonzero()] - d4
-        ]
+            z[np.unique((z < d1).nonzero()[0])],
+            z[np.unique(((z >= d1) & (z <= d2)).nonzero()[0])] - d1,
+            z[np.unique(((z > d2) & (z < d3)).nonzero()[0])] - d2,
+            z[np.unique((z >= d3).nonzero()[0])] - d3]
 
-        # Calculate Gamma at z=0, function of (freqs)
-        self.Gamma *= 0
-        for (k, l, r) in zip(
-                [k_s, k_0, k_s, k_0],
-                [d4 - d3, d3 - d2, d2 - d1, d1],
-                [r_s, r_0, r_s, r_0]):
+        # Wave vectors
+        k_0_z = self.k_air*self.k_r[0]
+        k_s_z = self.k_slab*self.k_prime_r[0]
+        k_0_z = k_0_z.real - 1j*np.abs(k_0_z.imag)
+        k_s_z = k_s_z.real - 1j*np.abs(k_s_z.imag)
+        # Reflexion and transmission coefficients
+        r_0_TE, r_s_TE = self.rho_TE, self.rho_prime_TE
+        t_0_TE, t_s_TE = self.tau_TE, self.tau_prime_TE
+        r_0_TM, r_s_TM = self.rho_TM, self.rho_prime_TM
+        t_0_TM, t_s_TM = self.tau_TM, self.tau_prime_TM
 
-            self.Gamma = np.exp(-2j*k*l) * \
-                (r + self.Gamma) / (1 + r*self.Gamma)
-
-        # Calculate 5 forward (A) and backward (B) fields at the start of each z_local,
+        # Calculate Gamma at z=0 by going backwards in z-direction
         # function of (freqs)
-        self.B[0] = self.A[0] * self.Gamma
-        for i, (k, l, r, t) in enumerate(zip(
-                [k_0, k_s, k_0, k_s],
-                [d1, d2 - d1, d3 - d2, d4 - d3],
-                [r_s, r_0, r_s, r_0],
-                [t_s, t_0, t_s, t_0])):
+        self.Gamma_TE *= 0
+        self.Gamma_TM *= 0
+        for i, (k_z, l, r_TE, r_TM) in enumerate(zip(
+            [k_s_z, k_0_z, k_s_z],
+            [d3 - d2, d2 - d1, d1],
+            [r_s_TE, r_0_TE, r_s_TE],
+            [r_s_TM, r_0_TM, r_s_TM])):
 
-            self.A[i+1] = 1/t * np.exp(-1j*k*l) * \
-                self.A[i] + r/t * np.exp(1j*k*l) * self.B[i]
-            self.B[i+1] = r/t * np.exp(-1j*k*l) * \
-                self.A[i] + 1/t * np.exp(1j*k*l) * self.B[i]
+            self.Gamma_TE = np.exp(-2j*k_z*l) * (r_TE + self.Gamma_TE) / (1 + r_TE*self.Gamma_TE)
+            self.Gamma_TM = np.exp(-2j*k_z*l) * (r_TM + self.Gamma_TM) / (1 + r_TM*self.Gamma_TM)
+
+        # Calculate 4 forward (A) and backward (B) waves at the start of each z_local
+        # function of (freqs)
+        self.B_TE[0] = self.A_TE[0] * self.Gamma_TE
+        self.B_TM[0] = self.A_TM[0] * self.Gamma_TM
+        for i, (k_z, l, r_TE, r_TM, t_TE, t_TM) in enumerate(zip(
+            [k_s_z, k_0_z, k_s_z],
+            [d1, d2 - d1, d3 - d2],
+            [r_0_TE, r_s_TE, r_0_TE],
+            [r_0_TM, r_s_TM, r_0_TM],
+            [t_0_TE, t_s_TE, t_0_TE],
+            [t_0_TM, t_s_TM, t_0_TM])):
+            
+            self.A_TE[i+1] = 1/t_TE * np.exp(-1j*k_z*l) * self.A_TE[i] + \
+                             r_TE/t_TE * np.exp(1j*k_z*l) * self.B_TE[i]
+            self.B_TE[i+1] = r_TE/t_TE * np.exp(-1j*k_z*l) * self.A_TE[i] + \
+                             1/t_TE * np.exp(1j*k_z*l) * self.B_TE[i]
+            self.A_TM[i+1] = 1/t_TM * np.exp(-1j*k_z*l) * self.A_TM[i] + \
+                             r_TM/t_TM * np.exp(1j*k_z*l) * self.B_TM[i]
+            self.B_TM[i+1] = r_TM/t_TM * np.exp(-1j*k_z*l) * self.A_TM[i] + \
+                             1/t_TM * np.exp(1j*k_z*l) * self.B_TM[i]
+        self.B_TE[-1] *= 0.
+        self.B_TM[-1] *= 0.
 
         # Calculate waves to the right (E_r) and to the left (E_l) using wave function,
-        # function of (freqs, z_local)
+        # function of (z, freqs)
+        print('Forward and backward waves propagation')
         z_i = 0
-        for i, k in enumerate([k_0, k_s, k_0, k_s, k_0]):
+        for i, k_z in enumerate(tqdm(
+            [k_s_z, k_0_z, k_s_z, k_0_z])):
 
-            self.E_r[z_i: z_i+len(z_local[i])] = self.A[i] * \
-                np.exp(-1j*np.outer(k, z_local[i])).T
-            self.E_l[z_i: z_i+len(z_local[i])] = self.B[i] * \
-                np.exp(1j*np.outer(k, z_local[i])).T
-            z_i += len(z_local[i])
+            z_ip1 = z_i + len(z_local[i])
+            z_l_k_z_delay = np.exp(-1j*np.multiply.outer(z_local[i], k_z))
+            z_l_k_z_delay_1 = 1/z_l_k_z_delay
+            self.E_r_TE[z_i: z_ip1] = z_l_k_z_delay * self.A_TE[i]
+            self.E_l_TE[z_i: z_ip1] = z_l_k_z_delay_1 * self.B_TE[i]
+            self.E_r_TM[z_i: z_ip1] = z_l_k_z_delay * self.A_TM[i]
+            self.E_l_TM[z_i: z_ip1] = z_l_k_z_delay_1 * self.B_TM[i]
+            z_i = z_ip1
 
-        # Concatenate consecutive waves and perform IFFT
-        self.E_r = np.fft.ifft(np.fft.ifftshift(
-            self.E_r * self.spect, axes=1), norm='forward')
-        self.E_l = np.fft.ifft(np.fft.ifftshift(
-            self.E_l * self.spect, axes=1), norm='forward')
-        
-        return self.is_slab, self.E_r, self.E_l
+        # Perform IFFT on E_r, E_l
+        # function of (z, time)
+        print(f'FFT (size = {self.t.size})')
+        if self.is_2D:
+            x_delay = np.exp(-2j*np.pi * self.k_prime_r[1] * np.sqrt(self.eps_air*self.mu_0) * \
+                             np.multiply.outer(self.x[0], self.freqs))
+        else:
+            x_delay = 1.
+        x_delayed_spect = x_delay * self.spect
+        for E in tqdm([self.E_r_TE, self.E_l_TE, self.E_r_TM, self.E_l_TM]):
+            np.copyto(E, np.fft.ifft(np.fft.ifftshift(
+                         E * x_delayed_spect, axes=-1), norm='forward'))
 
     def start(self):
-        self.update_slab()   
-        # Define what the slider update should do
-        def update_slider(val):
-            self.slab2_end = val + self.slab2_end - self.slab2_start
-            self.slab2_start = val
-            self.update_slab()
-            self.slab_poly.set_data(self.z, -2., 2., where=self.is_slab)
-            self.fig2.canvas.draw_idle()
+        self.update_arrays()
 
         # Define what the animation should do at each frame
-        def update_fig(t_i) -> Iterable[plt.Artist]:
-            E_r = self.E_r[:, t_i].real
-            E_l = self.E_l[:, t_i].real
-            self.E_r_line.set_data(self.z, E_r)
-            self.E_l_line.set_data(self.z, E_l)
-            self.E_sum_line.set_data(self.z, E_r + E_l)
-            self.ax2.legend(loc=1)
-            self.fig2.suptitle(f't = {self.t[t_i]:.2e} s')
-            return self.E_r_line, self.E_l_line, self.E_sum_line
-
-        # Create the animation
-        anim = FuncAnimation(self.fig2, update_fig, frames=self.t_indices,
-                             interval=10)
+        def update_fig2(t_i) -> Iterable[plt.Artist]:
+            self.current_frame = t_i
+            E_r_TE = np.take(self.E_r_TE, t_i, axis=-1).real
+            E_l_TE = np.take(self.E_l_TE, t_i, axis=-1).real
+            E_r_TM = np.take(self.E_r_TM, t_i, axis=-1).real
+            E_l_TM = np.take(self.E_l_TM, t_i, axis=-1).real
+            if self.is_2D:
+                self.E_TE_mesh.set_array(np.abs(E_r_TE + E_l_TE))
+                self.E_TM_mesh.set_array(np.abs(E_r_TM + E_l_TM))
+                self.E_45_mesh.set_array(np.sqrt(2)/2 * \
+                    np.abs(E_r_TE + E_l_TE + E_r_TM + E_l_TM))
+            else:
+                self.E_r_TE_line.set_data(self.z, E_r_TE)
+                self.E_l_TE_line.set_data(self.z, E_l_TE)
+                self.E_sum_TE_line.set_data(self.z, E_r_TE + E_l_TE)
+                self.E_r_TM_line.set_data(self.z, E_r_TM)
+                self.E_l_TM_line.set_data(self.z, E_l_TM)
+                self.E_sum_TM_line.set_data(self.z, E_r_TM + E_l_TM)
+                self.E_r_45_line.set_data(self.z, np.sqrt(2)/2 * \
+                    (E_r_TE + E_r_TM))
+                self.E_l_45_line.set_data(self.z, np.sqrt(2)/2 * \
+                    (E_l_TE + E_l_TM))
+                self.E_sum_45_line.set_data(self.z, np.sqrt(2)/2 * \
+                    (E_r_TE + E_l_TE + E_r_TM + E_l_TM))
+            self.ax2_title.set_text(f't = {self.t[t_i]:.2e} s')
+            return (*self.ax2.lines, *self.ax2.collections, *self.ax2.patches, self.ax2_title)
         
-        # Define restart function
-        def restart(event):
-            anim.event_source.stop()
-            anim.frame_seq = anim.new_frame_seq()
-            anim.event_source.start()
+        self.anim2 = FuncAnimation(self.fig2, func=update_fig2,
+                                   frames=self.t_indices,
+                                   interval=20, blit=True)
         
-        # Define toggle function to update visibility
-        def toggle_display(label):
-            if label == r'$E_+$':
-                if self.E_r_line.get_visible():
-                    self.E_r_line.remove()
-                else:
-                    self.ax2.add_artist(self.E_r_line)
-                self.E_r_line.set_visible(not self.E_r_line.get_visible())
-            elif label == r'$E_-$':
-                if self.E_l_line.get_visible():
-                    self.E_l_line.remove()
-                else:
-                    self.ax2.add_artist(self.E_l_line)
-                self.E_l_line.set_visible(not self.E_l_line.get_visible())
-            elif label == r'$E = E_+ + E_-$':
-                if self.E_sum_line.get_visible():
-                    self.E_sum_line.remove()
-                else:
-                    self.ax2.add_artist(self.E_sum_line)
-                self.E_sum_line.set_visible(not self.E_sum_line.get_visible())
-            self.fig2.canvas.draw_idle()
-                
-        # Assign functions to slider and buttons
-        self.slider.on_changed(update_slider)
-        self.restart_button.on_clicked(restart)
-        self.check_buttons.on_clicked(toggle_display)
+        # Define display function for sliders and radio buttons update 
+        def display(event):
+            self.anim2._blit_draw((*self.ax2.lines, *self.ax2.collections, *self.ax2.patches))
+            self.anim2._draw_next_frame(self.current_frame, True)
 
-        plt.show()
+        # Define pause/play function
+        def pause_play(event):
+            if self.pause_play_button.label.get_text() == 'Pause':
+                self.pause_play_button.label.set_text('Play')
+                self.anim2.event_source.stop()
+            else:
+                self.pause_play_button.label.set_text('Pause')
+                self.anim2.event_source.start()
+
+        # Define loop back function
+        def loop_back(event):
+            self.anim2.frame_seq = self.anim2.new_frame_seq()
+            self.current_frame = 0
+            update_fig2(0)
+            self.anim2._draw_next_frame(0, True)
+        
+        # Assign functions to sliders and buttons
+        if self.sliders_and_buttons:
+            self.update_slab_slider_cid = self.slab2_slider.on_changed(self.update_arrays)
+            self.display_slab_slider_cid = self.slab2_slider.on_changed(display)
+            self.update_theta_slider_cid = self.theta_slider.on_changed(self.update_arrays)
+            self.display_theta_slider_cid = self.theta_slider.on_changed(display)
+            self.display_TE_TM_radio_buttons_cid = self.TE_TM_radio_buttons.on_clicked(display)
+            if not self.is_2D:
+                self.display_left_right_radio_buttons_cid = self.left_right_radio_buttons.on_clicked(display)
+            self.pause_play_button_cid = self.pause_play_button.on_clicked(pause_play)
+            self.loop_back_button_cid = self.loop_back_button.on_clicked(loop_back)
+
+            # Change button aspects
+            self.start_stop_button.label.set_text('Stop')
+            self.pause_play_button.color = '0.85'
+            self.pause_play_button.hovercolor = '0.95'
+            self.loop_back_button.color = '0.85'
+            self.loop_back_button.hovercolor = '0.95'
+    
+    def stop(self):
+        # Disconnect functions from sliders and buttons
+        self.slab2_slider.disconnect(self.update_slab_slider_cid)
+        self.slab2_slider.disconnect(self.display_slab_slider_cid)
+        self.theta_slider.disconnect(self.update_theta_slider_cid)
+        self.theta_slider.disconnect(self.display_theta_slider_cid)
+        self.TE_TM_radio_buttons.disconnect(self.display_TE_TM_radio_buttons_cid)
+        if not self.is_2D:
+            self.left_right_radio_buttons.disconnect(self.display_left_right_radio_buttons_cid)
+        self.pause_play_button.disconnect(self.pause_play_button_cid)
+        self.loop_back_button.disconnect(self.loop_back_button_cid)
+
+        # Change button aspects
+        self.start_stop_button.label.set_text('Start')
+        self.pause_play_button.label.set_text('Pause')
+        self.pause_play_button.color = '0.5'
+        self.pause_play_button.hovercolor = '0.5'
+        self.loop_back_button.color = '0.5'
+        self.loop_back_button.hovercolor = '0.5'
+
+        # Pause animation
+        self.anim2.pause()
+        self.fig2.canvas.draw()
 
 
 def parse_args(arg_list: list[str] = None):
@@ -332,9 +767,9 @@ def parse_args(arg_list: list[str] = None):
         usage='python %(prog)s [SIMULATION_PARAMETERS]')
     
     sim_group = parser.add_argument_group("Simulation Parameters")
-    sim_group.add_argument('-0', '--single_freq', action='store_true',
+    sim_group.add_argument('-s', '--single_freq', action='store_true',
                            help='Simulation with a single frequency')
-    sim_group.add_argument('-1', '--wave_packet', action='store_true',
+    sim_group.add_argument('-m', '--wave_packet', action='store_true',
                            help='Simulation with multiple frequencies')
     sim_group.add_argument('-f_0', action='store', type=float, default=None,
                            help='Sets the center frequency to this value')
@@ -344,8 +779,9 @@ def parse_args(arg_list: list[str] = None):
 
 def main(arg_list: list[str] = None):
     args = parse_args(arg_list)
-    sim = Simulation(**vars(args))
-    sim.start()
+    sim = Simulation(**vars(args), sliders_and_buttons=True)
+    plt.show()
+    
 
 
 if __name__ == '__main__':
