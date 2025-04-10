@@ -12,7 +12,7 @@ from scipy.constants import epsilon_0, mu_0
 from scipy import signal as sg
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.widgets import Slider, Button, RadioButtons
 
 """
@@ -73,7 +73,7 @@ class Simulation:
         t_step=t_step,
         t_max=None,
         # Spectrum initialization
-        single_freq=False,
+        single_freq=True,
         f_0=None,
         sigma_f_0=sigma_f_0,
         # Physical parameters
@@ -381,6 +381,9 @@ class Simulation:
         # ______________________________________________________________________
         self.ax2_title = self.ax2.set_title(f't = {self.t[0]:.2e} s', y=.9,
                                             bbox=dict(facecolor='lightgrey', alpha=1.))
+        # Animation parameters
+        self.is_animated = False
+        self.current_frame = 0
     
     def _init_sliders_buttons(self, **kwargs):
         # Adjust position of plots
@@ -388,15 +391,7 @@ class Simulation:
 
         # Update function for slab2 starting position
         def update_slab2_slider(val):
-            self.slab2_end = val + self.slab2_end - self.slab2_start
-            self.slab2_start = val
-            # Update slab region, function of (z)
-            self.is_slab = self.get_is_slab()
-            if self.is_2D:
-                self.d2_vline.set_xdata([self.slab2_start, self.slab2_start])
-                self.d3_vline.set_xdata([self.slab2_end, self.slab2_end])
-            else:
-                self.slab_poly.set_data(self.z, -2., 2., where=self.is_slab)
+            self.change_slab2_pos(val)
         
         # Initialize slab2 slider
         ax_slab2_slider = self.fig2.add_axes([0.2, 0.05, 0.65, 0.03])
@@ -409,8 +404,7 @@ class Simulation:
         
         # Update function for theta value
         def update_theta_slider(val):
-            self.theta = np.deg2rad(val)
-            self.update_theta()
+            self.set_theta(np.deg2rad(val))
             if self.is_2D:
                 self.arrow.set_data(dx=self.arrow_l*self.k_prime_r[0].real,
                                     dy=self.arrow_l*self.k_prime_r[1].real)
@@ -426,11 +420,7 @@ class Simulation:
 
         # Toggle function for 1D/2D figures
         def toggle_1D_2D(event):
-            plt.close('all')
-            self.is_2D = not self.is_2D
-            self._init_arrays()
-            self._init_figs()
-            self._init_sliders_buttons()
+            self.switch_1D_2D()
             plt.show()
 
         # Initialize 1D/2D button
@@ -441,14 +431,7 @@ class Simulation:
         
         # Toggle function to update visibility of left-right fields
         def toggle_left_right_display(label):
-            if label == r'$E_+$, $E_-$':
-                self.E_r_line.set_visible(True)
-                self.E_l_line.set_visible(True)
-                self.E_sum_line.set_visible(False)
-            elif label == r'$E_{tot}$':
-                self.E_r_line.set_visible(False)
-                self.E_l_line.set_visible(False)
-                self.E_sum_line.set_visible(True)
+            self.choose_left_right_display(label)
             self.fig2.canvas.draw_idle()
 
         # Initialize left-right radio button (E_r, E_l vs E_tot)
@@ -461,40 +444,10 @@ class Simulation:
 
         # Toggle function to update visibility of TE-TM modes
         def toggle_TE_TM_display(label):
-            if self.is_2D:
-                if label == r'$E_{TE}$':
-                    self.E_TE_mesh.set_visible(True)
-                    self.E_TM_mesh.set_visible(False)
-                    self.E_45_mesh.set_visible(False)
-                    self.cbar.update_normal(self.E_TE_mesh)
-                elif label == r'$E_{TM}$':
-                    self.E_TE_mesh.set_visible(False)
-                    self.E_TM_mesh.set_visible(True)
-                    self.E_45_mesh.set_visible(False)
-                    self.cbar.update_normal(self.E_TM_mesh)
-                elif label == r'$E_{45}$':
-                    self.E_TE_mesh.set_visible(False)
-                    self.E_TM_mesh.set_visible(False)
-                    self.E_45_mesh.set_visible(True)
-                    self.cbar.update_normal(self.E_45_mesh)
-            else:
-                self.E_l_line.set_visible(False)
-                self.E_r_line.set_visible(False)
-                self.E_sum_line.set_visible(False)
-                if label == r'$E_{TE}$':
-                    self.E_l_line = self.E_l_TE_line
-                    self.E_r_line = self.E_r_TE_line
-                    self.E_sum_line = self.E_sum_TE_line
-                elif label == r'$E_{TM}$':
-                    self.E_l_line = self.E_l_TM_line
-                    self.E_r_line = self.E_r_TM_line
-                    self.E_sum_line = self.E_sum_TM_line
-                elif label == r'$E_{45}$':
-                    self.E_l_line = self.E_l_45_line
-                    self.E_r_line = self.E_r_45_line
-                    self.E_sum_line = self.E_sum_45_line
+            self.switch_TE_TM_display(label)
+            if not self.is_2D:
                 label = self.left_right_radio_buttons.value_selected
-                toggle_left_right_display(label)
+                self.toggle_left_right_display(label)
             self.fig2.canvas.draw_idle()
 
         # Initialize TE-TM radio button (E_TE vs E_TM vs E_45°)
@@ -533,6 +486,17 @@ class Simulation:
         self.loop_back_button = Button(ax_loop_back_button, 'Loop back',
                                        color='0.5', hovercolor='0.5')
 
+    def change_slab2_pos(self, pos):
+        self.slab2_end = pos + self.slab2_end - self.slab2_start
+        self.slab2_start = pos
+        # Update slab region, function of (z)
+        self.is_slab = self.get_is_slab()
+        if self.is_2D and self.d2_vline and self.d3_vline:
+            self.d2_vline.set_xdata([self.slab2_start, self.slab2_start])
+            self.d3_vline.set_xdata([self.slab2_end, self.slab2_end])
+        elif not self.is_2D and self.slab_poly:
+            self.slab_poly.set_data(self.z, -2., 2., where=self.is_slab)
+
     def update_theta(self):
         th_s = np.complex128(self.theta)
         th_0 = np.arcsin(np.sin(th_s) * np.sqrt(self.eps_rel))
@@ -565,6 +529,13 @@ class Simulation:
         self.tau_TM = 1 + self.rho_TM
         self.rho_prime_TM = -self.rho_TM
         self.tau_prime_TM = 1 + self.rho_prime_TM
+
+    def set_theta(self, theta):
+        self.theta = theta
+        self.update_theta()
+        if self.arrow and self.is_2D:
+            self.arrow.set_data(dx=self.arrow_l*self.k_prime_r[0].real,
+                                dy=self.arrow_l*self.k_prime_r[1].real)
 
     def get_is_slab(self):
         return ((self.z < self.slab1_end)) | \
@@ -652,14 +623,15 @@ class Simulation:
         # function of (z, time)
         print(f'FFT (size = {self.t.size})')
         if self.is_2D:
-            x_delay = np.exp(-2j*np.pi * self.k_prime_r[1] * np.sqrt(self.eps_air*self.mu_0) * \
+            x_delay = np.exp(-2j*np.pi * self.k_prime_r[1] * \
+                             np.sqrt(self.eps_rel*self.eps_air*self.mu_0) * \
                              np.multiply.outer(self.x[0], self.freqs))
         else:
             x_delay = 1.
         x_delayed_spect = x_delay * self.spect
         for E in tqdm([self.E_r_TE, self.E_l_TE, self.E_r_TM, self.E_l_TM]):
             np.copyto(E, np.fft.ifft(np.fft.ifftshift(
-                         E * x_delayed_spect, axes=-1), norm='forward'))
+                E * x_delayed_spect, axes=-1), norm='forward'))
 
     def start(self):
         self.update_arrays()
@@ -695,6 +667,7 @@ class Simulation:
         self.anim2 = FuncAnimation(self.fig2, func=update_fig2,
                                    frames=self.t_indices,
                                    interval=20, blit=True)
+        self.is_animated = True
         
         # Define display function for sliders and radio buttons update 
         def display(event):
@@ -737,28 +710,165 @@ class Simulation:
             self.loop_back_button.hovercolor = '0.95'
     
     def stop(self):
-        # Disconnect functions from sliders and buttons
-        self.slab2_slider.disconnect(self.update_slab_slider_cid)
-        self.slab2_slider.disconnect(self.display_slab_slider_cid)
-        self.theta_slider.disconnect(self.update_theta_slider_cid)
-        self.theta_slider.disconnect(self.display_theta_slider_cid)
-        self.TE_TM_radio_buttons.disconnect(self.display_TE_TM_radio_buttons_cid)
-        if not self.is_2D:
-            self.left_right_radio_buttons.disconnect(self.display_left_right_radio_buttons_cid)
-        self.pause_play_button.disconnect(self.pause_play_button_cid)
-        self.loop_back_button.disconnect(self.loop_back_button_cid)
+        if self.sliders_and_buttons:
+            # Disconnect functions from sliders and buttons
+            self.slab2_slider.disconnect(self.update_slab_slider_cid)
+            self.slab2_slider.disconnect(self.display_slab_slider_cid)
+            self.theta_slider.disconnect(self.update_theta_slider_cid)
+            self.theta_slider.disconnect(self.display_theta_slider_cid)
+            self.TE_TM_radio_buttons.disconnect(self.display_TE_TM_radio_buttons_cid)
+            if not self.is_2D:
+                self.left_right_radio_buttons.disconnect(self.display_left_right_radio_buttons_cid)
+            self.pause_play_button.disconnect(self.pause_play_button_cid)
+            self.loop_back_button.disconnect(self.loop_back_button_cid)
 
-        # Change button aspects
-        self.start_stop_button.label.set_text('Start')
-        self.pause_play_button.label.set_text('Pause')
-        self.pause_play_button.color = '0.5'
-        self.pause_play_button.hovercolor = '0.5'
-        self.loop_back_button.color = '0.5'
-        self.loop_back_button.hovercolor = '0.5'
+            # Change button aspects
+            self.start_stop_button.label.set_text('Start')
+            self.pause_play_button.label.set_text('Pause')
+            self.pause_play_button.color = '0.5'
+            self.pause_play_button.hovercolor = '0.5'
+            self.loop_back_button.color = '0.5'
+            self.loop_back_button.hovercolor = '0.5'
 
         # Pause animation
         self.anim2.pause()
         self.fig2.canvas.draw()
+
+    # Switch function for 1D/2D figures
+    def switch_1D_2D(self):
+        plt.close('all')
+        self.is_2D = not self.is_2D
+        self._init_arrays()
+        self._init_figs()
+        if self.sliders_and_buttons:
+            self._init_sliders_buttons()
+    
+    # Switch function to update visibility of left-right fields
+    def switch_left_right_display(self, label):
+        assert self.is_2D == False
+        if label == r'$E_+$, $E_-$':
+            self.E_r_line.set_visible(True)
+            self.E_l_line.set_visible(True)
+            self.E_sum_line.set_visible(False)
+        elif label == r'$E_{tot}$':
+            self.E_r_line.set_visible(False)
+            self.E_l_line.set_visible(False)
+            self.E_sum_line.set_visible(True)
+        else:
+            raise ValueError(f'{label} is an invalid label name')
+    
+    def switch_TE_TM_display(self, label):
+        if self.is_2D:
+            if label == r'$E_{TE}$':
+                self.E_TE_mesh.set_visible(True)
+                self.E_TM_mesh.set_visible(False)
+                self.E_45_mesh.set_visible(False)
+                self.cbar.update_normal(self.E_TE_mesh)
+            elif label == r'$E_{TM}$':
+                self.E_TE_mesh.set_visible(False)
+                self.E_TM_mesh.set_visible(True)
+                self.E_45_mesh.set_visible(False)
+                self.cbar.update_normal(self.E_TM_mesh)
+            elif label == r'$E_{45}$':
+                self.E_TE_mesh.set_visible(False)
+                self.E_TM_mesh.set_visible(False)
+                self.E_45_mesh.set_visible(True)
+                self.cbar.update_normal(self.E_45_mesh)
+            else:
+                raise ValueError(f'{label} is an invalid label name')
+        else:
+            self.E_l_line.set_visible(False)
+            self.E_r_line.set_visible(False)
+            self.E_sum_line.set_visible(False)
+            if label == r'$E_{TE}$':
+                self.E_l_line = self.E_l_TE_line
+                self.E_r_line = self.E_r_TE_line
+                self.E_sum_line = self.E_sum_TE_line
+            elif label == r'$E_{TM}$':
+                self.E_l_line = self.E_l_TM_line
+                self.E_r_line = self.E_r_TM_line
+                self.E_sum_line = self.E_sum_TM_line
+            elif label == r'$E_{45}$':
+                self.E_l_line = self.E_l_45_line
+                self.E_r_line = self.E_r_45_line
+                self.E_sum_line = self.E_sum_45_line
+            else:
+                raise ValueError(f'{label} is an invalid label name')
+
+    def save(self, fig, filename='slabs'):
+        f = __file__ + f'/../{filename}'
+        if fig == 1:
+            self.fig1.savefig(f + '.png', dpi=200)
+        elif fig == 2:
+            if not self.is_animated:
+                raise ValueError("Animation is not started, use start method before saving")
+            pil = PillowWriter(fps=20)
+            self.anim2.save(f + '.gif', writer=pil)
+
+
+def pptx_images():
+    # Single freq, 2D, theta @ 15°
+    # __________________________________________________________________________
+    sim = Simulation(single_freq=True, sliders_and_buttons=False, is_2D=True, theta=15)
+    sim.start()
+    # __________________________________________________________________________
+    sim.save(1, 'single_freq_spectrum')
+    sim.switch_TE_TM_display(r'$E_{45}$')
+    sim.save(2, 'single_freq_2D_E_45')
+    sim.switch_TE_TM_display(r'$E_{TE}$')
+    sim.save(2, 'single_freq_2D_E_TE')
+    sim.switch_TE_TM_display(r'$E_{TM}$')
+    sim.save(2, 'single_freq_2D_E_TM')
+    # __________________________________________________________________________
+    # theta @ brewster_angle
+    # __________________________________________________________________________
+    theta_b = np.arctan(1/np.sqrt(sim.eps_rel))
+    sim.set_theta(theta_b)
+    sim.update_arrays()
+    sim.switch_TE_TM_display(r'$E_{TM}$')
+    sim.save(2, 'single_freq_2D_E_TM_brewster')
+    sim.switch_TE_TM_display(r'$E_{TE}$')
+    sim.save(2, 'single_freq_2D_E_TE_brewster')
+    sim.switch_1D_2D()
+    sim.start()
+    sim.switch_TE_TM_display(r'$E_{TM}$')
+    sim.switch_left_right_display(r'$E_+$, $E_-$')
+    sim.save(2, 'single_freq_1D_E_TM_brewster')
+    sim.switch_1D_2D()
+    sim.start()
+    # __________________________________________________________________________
+    # Evanescent waves
+    # __________________________________________________________________________
+    theta_c = np.arcsin(1/np.sqrt(sim.eps_rel))
+    sim.set_theta(theta_c + 5)
+    sim.update_arrays()
+    sim.switch_TE_TM_display(r'$E_{45}$')
+    sim.save(2, 'single_freq_2D_E_45_evan_far')
+    original_pos = sim.slab2_start
+    sim.change_slab2_pos(sim.slab1_end + 0.2)
+    sim.update_arrays()
+    sim.save(2, 'single_freq_2D_E_45_evan_close')
+    sim.switch_1D_2D()
+    sim.start()
+    sim.switch_TE_TM_display(r'$E_{45}$')
+    sim.switch_left_right_display(r'$E_{tot}$')
+    sim.save(2, 'single_freq_1D_E_45_evan_close')
+    sim.change_slab2_pos(original_pos)
+    sim.update_arrays()
+    sim.save(2, 'single_freq_1D_E_45_evan_far')
+    # __________________________________________________________________________
+    # Wavepacket
+    # __________________________________________________________________________
+    plt.close('all')
+    sim2 = Simulation(single_freq=False, sliders_and_buttons=False, is_2D=True, theta=15)
+    sim2.start()
+    sim2.save(1, 'wave_packet_spectrum')
+    sim2.switch_TE_TM_display(r'$E_{45}$')
+    sim2.save(2, 'wave_packet_2D_E_45')
+    sim2.switch_TE_TM_display(r'$E_{TE}$')
+    sim2.save(2, 'wave_packet_2D_E_TE')
+    sim2.switch_TE_TM_display(r'$E_{TM}$')
+    sim2.save(2, 'wave_packet_2D_E_TM')
 
 
 def parse_args(arg_list: list[str] = None):
@@ -769,19 +879,22 @@ def parse_args(arg_list: list[str] = None):
     sim_group = parser.add_argument_group("Simulation Parameters")
     sim_group.add_argument('-s', '--single_freq', action='store_true',
                            help='Simulation with a single frequency')
-    sim_group.add_argument('-m', '--wave_packet', action='store_true',
+    sim_group.add_argument('-wp', '--wave_packet', action='store_true',
                            help='Simulation with multiple frequencies')
     sim_group.add_argument('-f_0', action='store', type=float, default=None,
                            help='Sets the center frequency to this value')
     
-    return parser.parse_args(arg_list)
+    myParser = parser.parse_args(arg_list)
+    myParser.single_freq = not myParser.wave_packet
+
+    return myParser
 
 
 def main(arg_list: list[str] = None):
     args = parse_args(arg_list)
-    sim = Simulation(**vars(args), sliders_and_buttons=True)
+    # pptx_images()
+    sim = Simulation(**vars(args), sliders_and_buttons=True, is_2D=True)
     plt.show()
-    
 
 
 if __name__ == '__main__':
