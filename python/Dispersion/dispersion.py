@@ -1,4 +1,12 @@
 # -*- coding: utf-8 -*-
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "matplotlib",
+#     "numpy",
+#     "scipy",
+# ]
+# ///
 """
 Created on Wed Feb 19 14:06:49 2025
 
@@ -106,3 +114,4 @@ anim = FuncAnimation(fig3, update, frames=t_indices,
                      init_func=init_fig, interval=10)
 
 plt.show()
+

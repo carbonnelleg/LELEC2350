@@ -1,4 +1,13 @@
 # -*- coding: utf-8 -*-
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "matplotlib",
+#     "numpy",
+#     "scipy",
+#     "tqdm",
+# ]
+# ///
 """
 Created on Mon Mar  3 18:36:18 2025
 
@@ -431,7 +440,7 @@ class Simulation:
         
         # Toggle function to update visibility of left-right fields
         def toggle_left_right_display(label):
-            self.choose_left_right_display(label)
+            self.switch_left_right_display(label)
             self.fig2.canvas.draw_idle()
 
         # Initialize left-right radio button (E_r, E_l vs E_tot)
@@ -447,7 +456,7 @@ class Simulation:
             self.switch_TE_TM_display(label)
             if not self.is_2D:
                 label = self.left_right_radio_buttons.value_selected
-                self.toggle_left_right_display(label)
+                toggle_left_right_display(label)
             self.fig2.canvas.draw_idle()
 
         # Initialize TE-TM radio button (E_TE vs E_TM vs E_45°)
@@ -899,3 +908,4 @@ def main(arg_list: list[str] = None):
 
 if __name__ == '__main__':
     main()
+
