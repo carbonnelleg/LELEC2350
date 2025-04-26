@@ -16,6 +16,7 @@ Created on Wed Apr 11 10:23:01 2025
 import skrf as rf
 import scipy as sc
 from scipy.constants import epsilon_0, mu_0
+from scipy.integrate import trapezoid as trap
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -39,7 +40,7 @@ Y, X = np.meshgrid(y, x)
 
 freqs = sc.io.loadmat(__file__ + '/../freq.mat').get('freq').reshape(-1,)   # shape=(40,), dtype=float64
 freqs *= 1e+9
-Z_mom = sc.io.loadmat(__file__ + '/../Z_mom_tot.mat').get('Z_mom_tot')      # shape=(40, N, N), dtype=complex128
+Z_mom = sc.io.loadmat(__file__ + '/../Z_mom_tot.mat').get('Z_mom_tot')      # shape=(freqs.size, N, N), dtype=complex128
 
 F_b = np.stack([np.zeros_like(X) for _ in range(N)], axis=0)                # shape=(N, x.size, y.size), dtype=float64
 
@@ -50,30 +51,37 @@ End of variable declaration
 _______________________________________________________________________________
 Computation of rooftop basis functions and w vector
 """
+tol = 1e-3
 for i, _ in enumerate(F_b):
-    # integral of F_b[i] is 1 over area of unit cell
     x_m = (i+1)*delta_x-w_x/2
     F_b[i] = np.maximum(0., (-np.abs(X-x_m)/delta_x+1)/(delta_x*w_y))
+    # integral of F_b[i] should be 1.0 over area of unit cell
+    I = trap(trap(F_b[i], dx=y_step), dx=x_step)
+    assert np.abs(I - 1.0 < tol)
 
-w = H_inc*np.ones((freqs.size, N, 1))               # shape=(40, N, 1), dtype=float64
+w = H_inc*np.ones((freqs.size, N, 1))                   # shape=(freqs.size, N, 1), dtype=float64
 """
 _______________________________________________________________________________
 Computation of x vector (coefficients of rooftop basis functions)
 """
-x_coeff = np.linalg.solve(Z_mom, w)                 # shape=(40, N, 1), dtype=complex128
+x_coeff = np.linalg.solve(Z_mom, w)                     # shape=(freqs.size, N, 1), dtype=complex128
 x_coeff *= eta**2/2
 """
 _______________________________________________________________________________
 Computation of transmittance (given unit incoming electric field)
 """
-T = 1/(a_x*a_y  ) * x_coeff.sum(axis=1).flatten()     # shape=(40,), dtype=complex128
+T = 1/(a_x*a_y*1e+3) * x_coeff.sum(axis=1).flatten()    # shape=(freqs.size,), dtype=complex128
+"""
+_______________________________________________________________________________
+Create sk-rf networks of the simulation and the measurements
+"""
+sim_ntw = rf.Network(frequency=freqs, s=T, name='Simulation')
 
-ntw_grid = rf.Network(__file__ + '/../withgrid.s2p')
-ntw_nogrid = rf.Network(__file__ + '/../withoutgrid.s2p')
+grid_ntw = rf.Network(__file__ + '/../withgrid.s2p')
+nogrid_ntw = rf.Network(__file__ + '/../withoutgrid.s2p')
+meas_ntw = grid_ntw/nogrid_ntw
+meas_ntw.name = 'Measurements'
 
-plt.plot(freqs, np.abs(T), label='Simulation')
-meas_T = np.abs(ntw_grid.s[:,0,1]/ntw_nogrid.s[:,0,1])
-plt.plot(ntw_grid.f, meas_T, label='Measurements')
-plt.yscale('log')
-plt.legend()
+sim_ntw.plot_s_db()
+meas_ntw.plot_s_db(m=1, n=0)
 plt.show()
