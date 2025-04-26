@@ -57,7 +57,7 @@ for i, _ in enumerate(F_b):
     F_b[i] = np.maximum(0., (-np.abs(X-x_m)/delta_x+1)/(delta_x*w_y))
     # integral of F_b[i] should be 1.0 over area of unit cell
     I = trap(trap(F_b[i], dx=y_step), dx=x_step)
-    assert np.abs(I - 1.0 < tol)
+    assert np.abs(I - 1.0) < tol
 
 w = H_inc*np.ones((freqs.size, N, 1))                   # shape=(freqs.size, N, 1), dtype=float64
 """
@@ -70,7 +70,7 @@ x_coeff *= eta**2/2
 _______________________________________________________________________________
 Computation of transmittance (given unit incoming electric field)
 """
-T = 1/(a_x*a_y*1e+3) * x_coeff.sum(axis=1).flatten()    # shape=(freqs.size,), dtype=complex128
+T = 1/(a_x*a_y*1e3) * x_coeff.sum(axis=1).flatten()    # shape=(freqs.size,), dtype=complex128
 """
 _______________________________________________________________________________
 Create sk-rf networks of the simulation and the measurements
