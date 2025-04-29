@@ -1,0 +1,163 @@
+\documentclass{article}
+\usepackage[english]{babel}
+\usepackage[letterpaper,top=2cm,bottom=2cm,left=2cm,right=2cm,marginparwidth=0.5cm]{geometry}
+
+% Useful packages
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{svg}
+\usepackage{float}
+\usepackage[colorlinks=true, allcolors=blue]{hyperref}
+\usepackage{natbib}
+
+\title{Electromagnetic waves - Lab 1}
+\author{52282000 - Carbonnelle Gautier\\
+19072400 - Chowdhury Kamrul Islam}
+
+\begin{document}
+\maketitle
+
+
+\section{Periodic Grid}
+
+\subsection{Methodology}
+
+The objective of this experiment is to analyze the transmittance through a periodic grid structure. The structure is excited by a plane wave incident normally (along the z-axis) and polarized along the y-axis.
+
+All details regarding the experimental setup are provided in the statement \cite{statement}. We will therefore assume that the reader is familiar with the experimental configuration.
+
+To approximate the transmittance of the grid, two measurements were performed:
+\begin{itemize}
+    \item A \textbf{free-space measurement}, without the grid between the antennas.
+    \item A \textbf{grid measurement}, with the grid placed between the antennas.
+\end{itemize}
+
+From these two measurements, the S-parameters of the grid are estimated by taking their ratio, as expressed in equation~\eqref{eq:S-param}:
+
+\begin{equation}
+    \label{eq:S-param}
+    S^{\text{meas}}(\omega) = \frac{S^{\text{grid}}(\omega)}{S^{\text{free-space}}(\omega)}
+\end{equation}
+
+\subsection{Theoretical Model}
+
+The theoretical prediction for the transmittance is based on the results presented in the solution of Exercise 9.2 from the practical session \cite{ex9}. The key equations are summarized below.
+
+The Method of Moments (MoM) formulation leads to the following linear system:
+
+\begin{equation}
+    \label{eq:MoM-lin-sys}
+    \frac{2}{\eta^2} \underline{\underline{\boldsymbol{Z}}} \boldsymbol{x} = \boldsymbol{w}
+\end{equation}
+where:
+\begin{itemize}
+    \item \(\underline{\underline{\boldsymbol{Z}}}\) is the MoM impedance matrix.
+    \item \(\boldsymbol{x}\) is the vector of unknown coefficients.
+    \item \(\boldsymbol{w}\) is the magnetic flux vector.
+\end{itemize}
+
+The magnetic flux vector \(\boldsymbol{w}\) is given by:
+
+\begin{equation}
+    \label{eq:magnetic-flux}
+    w_j = \iint \boldsymbol{F}_t^j \cdot \boldsymbol{H}_{\text{inc}} \, dS
+\end{equation}
+where \(\boldsymbol{F}_t^j\) are the rooftop basis functions and \(\boldsymbol{H}_{\text{inc}}\) is the incident magnetic field.
+
+The calculation of \(\boldsymbol{w}\) simplifies under two assumptions:
+\begin{itemize}
+    \item The rooftop basis functions are chosen to have a unitary integral over one unit cell.
+    \item The incident magnetic field is considered constant over the unit cell, a valid assumption in the case of plane wave excitation.
+\end{itemize}
+
+Finally, the \(S_{21}\) parameter in the normal direction (i.e., along \(z\)) can be expressed, after simplifications, as:
+
+\begin{equation}
+    \label{eq:normal-direction-S21}
+    E(x,y) = \frac{1}{a_x a_y} \sum_{i=1}^{N} x_i \iint F_b^i(x,y) \, dx \, dy
+\end{equation}
+where:
+\begin{itemize}
+    \item \(a_x\) and \(a_y\) are the periodicities along the \(x\) and \(y\) directions, respectively.
+    \item \(F_b^i(x,y)\) are the rooftop basis functions.
+\end{itemize}
+
+This model allows for the computation of the theoretical transmittance of the grid, which can then be compared to the experimental results.
+
+All equations and explanations are summarized in the excellent syllabus of the course \cite{syllabus}.
+
+
+\subsection{Results}
+
+The experimental data were processed using the open-source Python library \texttt{scikit-rf} \cite{scikit-rf}. This library provides tools for manipulating and analyzing vector network analyzer (VNA) data, notably by representing the measurements as electrical two-port networks.
+
+In our case, the S-parameters of the grid were estimated by computing the ratio of the measurements with and without the grid. The following Python code snippet illustrates the procedure\footnote{The same processing approach was used for Section~\ref{sec:Arago-spot}.}:
+
+\begin{verbatim}
+import skrf as rf
+
+grid_ntw = rf.Network('withgrid.s2p')
+nogrid_ntw = rf.Network('withoutgrid.s2p')
+meas_ntw = grid_ntw / nogrid_ntw
+\end{verbatim}
+
+The resulting transmittance as a function of frequency is displayed in Figure~\ref{fig:pow-freq-periodic}.
+
+\begin{figure}[H]
+\centering
+\includesvg[width=0.48\linewidth]{Images/pow_freq_periodic}
+\caption{Measured transmittance through the periodic grid as a function of frequency.}
+\label{fig:pow-freq-periodic}
+\end{figure}
+
+\subsubsection{Analysis}
+
+From Figure~\ref{fig:pow-freq-periodic}, we observe that the transmittance remains relatively high across most of the frequency band, indicating that the grid introduces only moderate attenuation of the transmitted wave.
+
+Notably, a dip in the transmittance is visible around \( 12 \) GHz. This suggests the presence of a resonant behavior of the grid structure at this frequency, possibly due to the periodicity and dimensions of the grid elements relative to the wavelength. Such a resonance results in increased reflection or absorption, leading to a decrease in transmitted power.
+
+The measurements also show regions of high attenuation near \(10\) GHz. However, these are not predicted by the theoretical model and may be due to irregularities of the metallic periodic grid.
+
+Outside the resonant region, the transmittance stabilizes again at a higher level, consistent with the expectation that the grid behaves almost transparently for frequencies far from its resonant behavior.
+
+Overall, the experimental results are consistent with the theoretical prediction that periodic metallic structures can exhibit frequency-selective transmission characteristics.
+
+
+\section{Arago Spot}
+\label{sec:Arago-spot}
+
+The objective of this second experiment is to investigate the appearance of the Arago spot, a bright point observed at the center of the shadow of a circular obstacle when illuminated by a coherent plane wave.
+
+The measurement setup remains similar to the previous experiment, with the addition of a circular disk placed between the transmitting and receiving antennas. The VNA measurements were processed using the same method described in the previous section, relying on the \texttt{scikit-rf} Python library for data manipulation.
+
+Figure~\ref{fig:arago-spot-results} presents two key results:
+\begin{itemize}
+    \item The measured transmittance as a function of frequency (left graph),
+    \item The transmittance as a function of lateral offset off the disk center (right graph) for specific frequency and averaged over whole frequency range.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includesvg[width=0.48\linewidth]{Images/pow_freq_arago}
+\hfill
+\includesvg[width=0.48\linewidth]{Images/pow_offset_arago}
+\caption{(Left) Measured transmittance as a function of frequency, normalized by the free-space response, in the presence of the disk. (Right) Measured transmittance as a function of the lateral displacement of the disk.}
+\label{fig:arago-spot-results}
+\end{figure}
+
+\subsection{Analysis}
+
+The left graph of Figure~\ref{fig:arago-spot-results} shows that the transmittance exhibits relatively smooth variations across the considered frequency range, without the pronounced resonant features observed in the grid experiment. This behavior is expected, as the main phenomenon here is diffraction rather than frequency-selective transmission.
+
+Other offset's responses are not shown here because they are better visualized by the right graph of Figure~\ref{fig:arago-spot-results}.
+
+The right graph provides more direct evidence of the Arago spot phenomenon: when both antenna's are aligned with the center of the disk (\( \Delta x = 30 \)), a local maximum of transmittance is observed. This is a signature of constructive interference caused by the diffraction of the electromagnetic wave around the disk, resulting in a bright spot at the center of the shadow.
+
+As the offset changes, the transmittance decreases and then increases again for larger offsets, confirming that the maximum intensity is located at the center. This behavior is symmetric around the center, which is consistent with the circular symmetry of the disk and the isotropic diffraction pattern expected.
+
+Overall, the experimental results clearly demonstrate the existence of the Arago spot and are in good agreement with theoretical diffraction predictions.
+
+\bibliographystyle{abbrv}
+\bibliography{sample}
+
+\end{document}

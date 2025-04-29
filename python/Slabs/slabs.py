@@ -805,7 +805,7 @@ class Simulation:
                 raise ValueError(f'{label} is an invalid label name')
 
     def save(self, fig, filename='slabs'):
-        f = __file__ + f'/../{filename}'
+        f = __file__ + f'/../graphs/{filename}'
         if fig == 1:
             self.fig1.savefig(f + '.png', dpi=200)
         elif fig == 2:

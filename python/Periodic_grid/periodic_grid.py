@@ -38,9 +38,9 @@ x = np.arange(-w_x/2, w_x/2+x_step, x_step)
 y = np.arange(-w_y/2, w_y/2+y_step, y_step)
 Y, X = np.meshgrid(y, x)
 
-freqs = sc.io.loadmat(__file__ + '/../freq.mat').get('freq').reshape(-1,)   # shape=(40,), dtype=float64
+freqs = sc.io.loadmat(__file__ + '/../data/freq.mat').get('freq').reshape(-1,)   # shape=(40,), dtype=float64
 freqs *= 1e+9
-Z_mom = sc.io.loadmat(__file__ + '/../Z_mom_tot.mat').get('Z_mom_tot')      # shape=(freqs.size, N, N), dtype=complex128
+Z_mom = sc.io.loadmat(__file__ + '/../data/Z_mom_tot.mat').get('Z_mom_tot')      # shape=(freqs.size, N, N), dtype=complex128
 
 F_b = np.stack([np.zeros_like(X) for _ in range(N)], axis=0)                # shape=(N, x.size, y.size), dtype=float64
 
@@ -78,8 +78,8 @@ Create sk-rf networks of the simulation and the measurements
 S = np.array([[np.zeros_like(S21_sim), S21_sim], [S21_sim, np.zeros_like(S21_sim)]]).T
 sim_ntw = rf.Network(frequency=freqs, s=S, name='Simulation')
 
-grid_ntw = rf.Network(__file__ + '/../withgrid.s2p')
-nogrid_ntw = rf.Network(__file__ + '/../withoutgrid.s2p')
+grid_ntw = rf.Network(__file__ + '/../data/withgrid.s2p')
+nogrid_ntw = rf.Network(__file__ + '/../data/withoutgrid.s2p')
 meas_ntw = grid_ntw/nogrid_ntw
 meas_ntw.name = 'Measurements'
 

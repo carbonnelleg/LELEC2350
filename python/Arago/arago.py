@@ -21,8 +21,8 @@ _______________________________________________________________________________
 Importing VNA data
 """
 x_offset = np.arange(0, 70, 5)
-ref_ntw = rf.Network(__file__ + '/../no_arago.s2p')
-arago_ntws = [rf.Network(__file__ + f'/../arago_{x}.s2p')/ref_ntw for x in x_offset]
+ref_ntw = rf.Network(__file__ + '/../data/no_arago.s2p')
+arago_ntws = [rf.Network(__file__ + f'/../data/arago_{x}.s2p')/ref_ntw for x in x_offset]
 
 mean_pow = [np.mean(np.abs(ntw.s[:,1,0])) for ntw in arago_ntws]
 f_11Ghz_pow = [ntw.s[ntw.f.size//2,1,0] for ntw in arago_ntws]
