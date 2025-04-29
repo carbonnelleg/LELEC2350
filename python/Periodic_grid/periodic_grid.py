@@ -70,18 +70,20 @@ x_coeff *= eta**2/2
 _______________________________________________________________________________
 Computation of transmittance (given unit incoming electric field)
 """
-T = 1/(a_x*a_y*1e3) * x_coeff.sum(axis=1).flatten()    # shape=(freqs.size,), dtype=complex128
+S21_sim = 1/(a_x*a_y*1e3) * x_coeff.sum(axis=1).flatten()    # shape=(freqs.size,), dtype=complex128
 """
 _______________________________________________________________________________
 Create sk-rf networks of the simulation and the measurements
 """
-sim_ntw = rf.Network(frequency=freqs, s=T, name='Simulation')
+S = np.array([[np.zeros_like(S21_sim), S21_sim], [S21_sim, np.zeros_like(S21_sim)]]).T
+sim_ntw = rf.Network(frequency=freqs, s=S, name='Simulation')
 
 grid_ntw = rf.Network(__file__ + '/../withgrid.s2p')
 nogrid_ntw = rf.Network(__file__ + '/../withoutgrid.s2p')
 meas_ntw = grid_ntw/nogrid_ntw
 meas_ntw.name = 'Measurements'
 
-sim_ntw.plot_s_db()
+sim_ntw.plot_s_db(m=1, n=0)
 meas_ntw.plot_s_db(m=1, n=0)
+grid_ntw.plot_s_db(m=1, n=0)
 plt.show()

@@ -31,6 +31,8 @@ plt.figure()
 plt.plot(x_offset, 20*np.log10(mean_pow), label='Average over all frequencies')
 plt.plot(x_offset, 20*np.log10(np.abs(f_11Ghz_pow)), label='Power at f = 11 GHz')
 plt.legend()
+plt.xlabel('Offset [cm]')
+plt.ylabel('Magnitude [dB]')
 
 plt.figure()
 for i, ntw in enumerate(arago_ntws[5:8], start=5):
