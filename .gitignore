@@ -1,1 +1,22 @@
+# Python
+
 __pycache__/
+.mypy_cache/
+
+# TeX
+
+tex/*/*.aux
+tex/*/*.fdb_latexmk
+tex/*/*.fls
+tex/*/*.log
+tex/*/*.out
+tex/*/*.pdf
+tex/*/*.nav
+tex/*/*.bbl
+tex/*/*.blg
+tex/*/*.bcf
+tex/*/*.run.xml
+tex/*/*.snm
+tex/*/*.toc
+tex/*/*.synctex.gz
+tex/*/*.synctex(busy)
